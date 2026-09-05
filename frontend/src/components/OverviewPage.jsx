@@ -224,7 +224,7 @@ export default function OverviewPage({
                 padding: '0.25rem 0.65rem'
               }}
             >
-              ? AI-assisted record
+              AI-assisted record
             </span>
             <button
               className="secondary-btn btn-sm"

@@ -2,6 +2,15 @@ import React, { useState, useMemo, useEffect, useRef } from 'react'
 import ProvenanceBadge from './ProvenanceBadge'
 import { IconDoc, IconStructured, IconReview, IconTimeline, IconClose } from './Icons'
 
+function formatTestName(name) {
+  if (!name) return ''
+  const str = String(name).trim()
+  if (['wbc', 'rbc', 'hgb', 'hct', 'mcv', 'mch', 'mchc', 'rdw', 'bun', 'alt', 'ast', 'alp', 'egfr', 'tsh', 'crp', 'esr', 'inr', 'pt', 'ptt'].includes(str.toLowerCase())) {
+    return str.toUpperCase()
+  }
+  return str.charAt(0).toUpperCase() + str.slice(1)
+}
+
 // Helper for restrained status rendering (WCAG 2.2 multi-attribute: symbol + textual label)
 function getStatusConfig(status, hasRefRange) {
   if (!hasRefRange || status === 'not_assessed' || !status) {
@@ -128,7 +137,7 @@ export default function StructuredRecordPage({
         list.push({
           key: `${doc.document_id}-${key}`,
           testKey: key,
-          testName: item.test_name || key,
+          testName: formatTestName(item.test_name || key),
           value: item.value,
           unit: item.unit || '',
           sourceRangeRaw: item.source_range_raw || (item.reference_range ? `${item.reference_range.min}–${item.reference_range.max}` : null),
@@ -213,11 +222,11 @@ export default function StructuredRecordPage({
                 Processing & Evidence &rarr;
               </button>
             )}
-            <button className="secondary-btn btn-sm" onClick={onProceedToReview}>
-              Audit & Verify &rarr;
-            </button>
-            <button className="primary-btn btn-sm" onClick={onProceedToTimeline}>
+            <button className="secondary-btn btn-sm" onClick={onProceedToTimeline}>
               View Timeline &rarr;
+            </button>
+            <button className="primary-btn btn-sm" onClick={onProceedToReview}>
+              Audit & Verify &rarr;
             </button>
           </div>
         </div>

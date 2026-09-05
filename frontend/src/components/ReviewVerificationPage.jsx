@@ -1013,8 +1013,8 @@ export default function ReviewVerificationPage({
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                  <strong className="small muted" style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Source Text Snippet:
+                  <strong className="small muted">
+                    Source text snippet:
                   </strong>
                   <span className="small muted">Page {activeObs.source_page || 1}</span>
                 </div>

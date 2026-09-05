@@ -399,8 +399,8 @@ export default function ProcessingEvidencePage({
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
-            Pipeline Execution Sequence (8 Stages)
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+            Pipeline execution sequence (8 stages)
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             {stages.filter(s => s.status === 'completed' || s.status === 'verified').length} of {stages.length} stages completed
@@ -549,8 +549,8 @@ export default function ProcessingEvidencePage({
                   border: '1px solid var(--border-color, #E2E8F0)'
                 }}
               >
-                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                  What Was Produced
+                <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
+                  Output artifact
                 </div>
                 <div style={{ fontSize: '14px', color: 'var(--text-primary)', fontWeight: 500, lineHeight: 1.4 }}>
                   {stage.produced}

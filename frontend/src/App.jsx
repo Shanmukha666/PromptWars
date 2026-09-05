@@ -59,6 +59,8 @@ export default function App() {
       setIsDemoMode(false)
       if (activePatient?.patient_id) {
         await openPatient(activePatient.patient_id, false)
+      } else if (patientsData.items && patientsData.items.length > 0) {
+        await openPatient(patientsData.items[0].patient_id, false)
       }
     } catch (err) {
       console.warn('Backend API connection failed, initializing browser preview demo mode:', err)

@@ -113,6 +113,17 @@ body {
   border: 0 !important;
 }
 
+/* Ensure hidden file inputs and their native shadow DOM buttons never render */
+input[type="file"].sr-only,
+input[type="file"].sr-only::-webkit-file-upload-button {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  pointer-events: none !important;
+}
+
 /* Universal Visible Focus Indicators (WCAG 2.4.7 Focus Visible & 2.4.11 Focus Appearance) */
 :focus-visible {
   outline: 2px solid var(--border-focus) !important;
@@ -1220,6 +1231,20 @@ button:disabled {
   .section-header > :last-child {
     width: 100%;
   }
+
+  .demographic-context-pill {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .privacy-badge .privacy-text {
+    display: none;
+  }
+
+  .privacy-badge {
+    padding: 0.3rem 0.45rem;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1229,14 +1254,15 @@ button:disabled {
   }
 
   .top-bar {
-    align-items: flex-start;
-    gap: 0.6rem;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.75rem;
   }
 
   .top-bar-left {
     flex: 1;
     min-width: 0;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
 
   .patient-selector-wrap,
@@ -1248,17 +1274,18 @@ button:disabled {
   .top-bar-label,
   .demographic-context-pill,
   .privacy-badge {
-    display: none;
+    display: none !important;
   }
 
   .patient-select {
     min-width: 0;
-    max-width: none;
+    max-width: 180px;
     flex: 1;
   }
 
   .top-bar-right {
     gap: 0.35rem;
+    flex-shrink: 0;
   }
 
   .help-btn {
