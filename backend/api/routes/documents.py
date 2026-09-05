@@ -16,20 +16,28 @@ router = APIRouter(tags=["Documents"])
 @router.get("/documents")
 def list_documents(
     limit: int = 50,
+    offset: int = 0,
     patient_id: Optional[str] = None,
     session_id: str = Depends(get_session_id),
     repo: ReportRepository = Depends(get_report_repo),
 ) -> Dict[str, Any]:
-    return {"items": repo.list_documents(limit=limit, patient_id=patient_id, session_id=session_id)}
+    items = repo.list_documents(limit=limit, offset=offset, patient_id=patient_id, session_id=session_id)
+    return {
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "count": len(items),
+    }
 
 
 @router.get("/documents/{document_id}")
 def get_document(
     document_id: str,
+    include_chunks: bool = True,
     session_id: str = Depends(get_session_id),
     repo: ReportRepository = Depends(get_report_repo),
 ) -> Dict[str, Any]:
-    document = repo.get_document(document_id, session_id=session_id)
+    document = repo.get_document(document_id, session_id=session_id, include_chunks=include_chunks)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     

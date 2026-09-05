@@ -1,11 +1,12 @@
 """
-Base database connection and migration management for SQLite.
+Base database connection, index creation, and migration management for SQLite.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Optional
 from backend.config import settings
 
 
@@ -60,6 +61,12 @@ class BaseRepository:
                     metadata_json TEXT NOT NULL,
                     FOREIGN KEY(document_id) REFERENCES documents(document_id) ON DELETE CASCADE
                 );
+
+                -- High-performance composite indexes
+                CREATE INDEX IF NOT EXISTS idx_documents_session_created ON documents(session_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_documents_patient_session ON documents(patient_id, session_id);
+                CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id, chunk_index);
+                CREATE INDEX IF NOT EXISTS idx_patients_session_created ON patients(session_id, created_at DESC);
                 """
             )
             for col in [

@@ -1,5 +1,6 @@
 """
-Report & document data access repository with chunking, search index, and session scoping.
+Report & document data access repository with chunking, in-memory search index caching,
+and lazy loading of text chunks.
 """
 
 from __future__ import annotations
@@ -7,10 +8,11 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -53,9 +55,17 @@ class ReportRepository(BaseRepository):
         self.matrix_path = self.index_dir / "matrix.joblib"
         self.chunk_ids_path = self.index_dir / "chunk_ids.json"
 
+        # In-Memory Cache for fast similarity search without disk reads
+        self._cache_lock = threading.Lock()
+        self._cached_vectorizer: Optional[TfidfVectorizer] = None
+        self._cached_matrix: Optional[Any] = None
+        self._cached_chunk_ids: Optional[List[str]] = None
+        self._index_dirty = True
+
     def list_documents(
         self,
         limit: int = 50,
+        offset: int = 0,
         patient_id: Optional[str] = None,
         session_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -72,9 +82,9 @@ class ReportRepository(BaseRepository):
         sql = f"""
             SELECT document_id, patient_id, session_id, title, source_type, source_name, created_at, preview_text, metadata_json, ai_summary_json 
             FROM documents {where} 
-            ORDER BY created_at DESC LIMIT ?
+            ORDER BY created_at DESC LIMIT ? OFFSET ?
         """
-        params.append(limit)
+        params.extend([limit, offset])
 
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
@@ -99,7 +109,12 @@ class ReportRepository(BaseRepository):
             })
         return items
 
-    def get_document(self, document_id: str, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_document(
+        self,
+        document_id: str,
+        session_id: Optional[str] = None,
+        include_chunks: bool = True
+    ) -> Optional[Dict[str, Any]]:
         sql = "SELECT * FROM documents WHERE document_id = ?"
         params = [document_id]
         if session_id is not None:
@@ -110,10 +125,23 @@ class ReportRepository(BaseRepository):
             row = conn.execute(sql, params).fetchone()
             if row is None:
                 return None
-            chunks = conn.execute(
-                "SELECT chunk_id, chunk_index, chunk_text, token_estimate, metadata_json FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC",
-                (document_id,),
-            ).fetchall()
+
+            chunks_list = []
+            if include_chunks:
+                chunks = conn.execute(
+                    "SELECT chunk_id, chunk_index, chunk_text, token_estimate, metadata_json FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC",
+                    (document_id,),
+                ).fetchall()
+                chunks_list = [
+                    {
+                        "chunk_id": c["chunk_id"],
+                        "chunk_index": c["chunk_index"],
+                        "text": c["chunk_text"],
+                        "token_estimate": c["token_estimate"],
+                        "metadata": json.loads(c["metadata_json"]),
+                    }
+                    for c in chunks
+                ]
 
         return {
             "document_id": row["document_id"],
@@ -128,16 +156,7 @@ class ReportRepository(BaseRepository):
             "metadata": json.loads(row["metadata_json"]),
             "extracted": json.loads(row["extracted_json"]),
             "ai_summary": json.loads(row["ai_summary_json"]),
-            "chunks": [
-                {
-                    "chunk_id": c["chunk_id"],
-                    "chunk_index": c["chunk_index"],
-                    "text": c["chunk_text"],
-                    "token_estimate": c["token_estimate"],
-                    "metadata": json.loads(c["metadata_json"]),
-                }
-                for c in chunks
-            ],
+            "chunks": chunks_list,
         }
 
     def upsert_document(
@@ -245,18 +264,48 @@ class ReportRepository(BaseRepository):
             ).fetchall()
         texts = [r["chunk_text"] for r in rows]
         chunk_ids = [r["chunk_id"] for r in rows]
-        if not texts:
-            if self.vectorizer_path.exists():
-                self.vectorizer_path.unlink(missing_ok=True)
-            if self.matrix_path.exists():
-                self.matrix_path.unlink(missing_ok=True)
-            self.chunk_ids_path.write_text("[]", encoding="utf-8")
-            return
-        vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=12000)
-        matrix = vectorizer.fit_transform(texts)
-        joblib.dump(vectorizer, self.vectorizer_path)
-        joblib.dump(matrix, self.matrix_path)
-        self.chunk_ids_path.write_text(json.dumps(chunk_ids), encoding="utf-8")
+        with self._cache_lock:
+            if not texts:
+                if self.vectorizer_path.exists():
+                    self.vectorizer_path.unlink(missing_ok=True)
+                if self.matrix_path.exists():
+                    self.matrix_path.unlink(missing_ok=True)
+                self.chunk_ids_path.write_text("[]", encoding="utf-8")
+                self._cached_vectorizer = None
+                self._cached_matrix = None
+                self._cached_chunk_ids = []
+                self._index_dirty = False
+                return
+
+            vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=12000)
+            matrix = vectorizer.fit_transform(texts)
+            joblib.dump(vectorizer, self.vectorizer_path)
+            joblib.dump(matrix, self.matrix_path)
+            self.chunk_ids_path.write_text(json.dumps(chunk_ids), encoding="utf-8")
+
+            # Update in-memory cache directly
+            self._cached_vectorizer = vectorizer
+            self._cached_matrix = matrix
+            self._cached_chunk_ids = chunk_ids
+            self._index_dirty = False
+
+    def _get_in_memory_index(self) -> Tuple[Optional[TfidfVectorizer], Optional[Any], Optional[List[str]]]:
+        """Returns the in-memory cached vectorizer, matrix, and chunk IDs, loading once from disk if uninitialized."""
+        with self._cache_lock:
+            if not self._index_dirty and self._cached_vectorizer is not None and self._cached_matrix is not None and self._cached_chunk_ids is not None:
+                return self._cached_vectorizer, self._cached_matrix, self._cached_chunk_ids
+
+            if not (self.vectorizer_path.exists() and self.matrix_path.exists() and self.chunk_ids_path.exists()):
+                return None, None, None
+
+            try:
+                self._cached_vectorizer = joblib.load(self.vectorizer_path)
+                self._cached_matrix = joblib.load(self.matrix_path)
+                self._cached_chunk_ids = json.loads(self.chunk_ids_path.read_text(encoding="utf-8"))
+                self._index_dirty = False
+                return self._cached_vectorizer, self._cached_matrix, self._cached_chunk_ids
+            except Exception:
+                return None, None, None
 
     def search(
         self,
@@ -268,19 +317,23 @@ class ReportRepository(BaseRepository):
         query = normalize_space(query)
         if not query:
             return []
-        if not (self.vectorizer_path.exists() and self.matrix_path.exists() and self.chunk_ids_path.exists()):
+
+        vectorizer, matrix, chunk_ids = self._get_in_memory_index()
+        if vectorizer is None or matrix is None or not chunk_ids:
             return []
-        vectorizer: TfidfVectorizer = joblib.load(self.vectorizer_path)
-        matrix = joblib.load(self.matrix_path)
-        chunk_ids: List[str] = json.loads(self.chunk_ids_path.read_text(encoding="utf-8"))
+
         query_vec = vectorizer.transform([query])
         sims = cosine_similarity(query_vec, matrix).ravel()
-        order = np.argsort(sims)[::-1]
-        selected_chunk_ids = [chunk_ids[i] for i in order[: max(limit * 3, 20)] if sims[i] > 0]
-        if not selected_chunk_ids:
+        # Filter candidate chunk indices that have non-zero similarity
+        positive_indices = [i for i, sim in enumerate(sims) if sim > 0]
+        if not positive_indices:
             return []
-        placeholders = ",".join("?" for _ in selected_chunk_ids)
-        params: List[Any] = selected_chunk_ids[:]
+
+        # Map indices to chunk_ids
+        sim_map = {chunk_ids[i]: float(sims[i]) for i in positive_indices}
+        placeholders = ",".join("?" for _ in sim_map.keys())
+        params: List[Any] = list(sim_map.keys())
+
         sql = f"""
             SELECT c.chunk_id, c.chunk_text, c.metadata_json, d.document_id, d.title, d.session_id 
             FROM chunks c JOIN documents d ON d.document_id = c.document_id 
@@ -295,19 +348,14 @@ class ReportRepository(BaseRepository):
 
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-        by_id = {r["chunk_id"]: r for r in rows}
         q_terms = {token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 2}
         ranked_rows = []
-        for idx in order:
-            if sims[idx] <= 0:
-                break
-            cid = chunk_ids[idx]
-            row = by_id.get(cid)
-            if row is None:
-                continue
+        for row in rows:
+            cid = row["chunk_id"]
+            base_sim = sim_map.get(cid, 0.0)
             title_terms = set(re.findall(r"[a-z0-9]+", (row["title"] or "").lower()))
             title_overlap = len(q_terms & title_terms)
-            boosted_score = float(sims[idx]) + (0.03 * title_overlap)
+            boosted_score = base_sim + (0.03 * title_overlap)
             ranked_rows.append((boosted_score, row))
 
         ranked_rows.sort(key=lambda item: item[0], reverse=True)

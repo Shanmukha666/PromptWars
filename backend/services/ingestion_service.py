@@ -1,5 +1,6 @@
 """
-Ingestion Service: Upload validation, collision-safe file handling, and document persistence.
+Ingestion Service: Upload validation, streaming bounded file handling, and document persistence.
+Avoids reading arbitrarily large files entirely into RAM.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from backend.llm.client import GeminiClient
 from services.parser import get_parser_service
 
 logger = logging.getLogger("medlens.ingestion")
+STREAM_CHUNK_SIZE = 64 * 1024  # 64 KB streaming buffer
 
 
 class IngestionService:
@@ -55,22 +57,37 @@ class IngestionService:
         if suffix not in settings.ALLOWED_EXTENSIONS:
             raise UnsupportedFileTypeError(suffix, settings.ALLOWED_EXTENSIONS)
 
-        content = await upload.read()
-        if not content or len(content.strip()) == 0:
-            raise EmptyDocumentError()
-        if len(content) > settings.MAX_UPLOAD_BYTES:
-            raise FileTooLargeError(len(content), settings.MAX_UPLOAD_BYTES)
-
-        if suffix in settings.MAGIC_SIGNATURES:
-            sig = settings.MAGIC_SIGNATURES[suffix]
-            if not content.startswith(sig):
-                raise MagicBytesMismatchError(suffix)
-
         file_uuid = uuid.uuid4().hex
         file_path = settings.UPLOAD_DIR / f"upload_{file_uuid}{suffix}"
 
+        total_bytes = 0
+        first_chunk: bytes = b""
+
+        # Bounded streaming to disk: prevents memory spikes under concurrent or large uploads
         try:
-            file_path.write_bytes(content)
+            with open(file_path, "wb") as f_out:
+                while True:
+                    chunk = await upload.read(STREAM_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    if total_bytes == 0:
+                        first_chunk = chunk
+                    total_bytes += len(chunk)
+
+                    if total_bytes > settings.MAX_UPLOAD_BYTES:
+                        raise FileTooLargeError(total_bytes, settings.MAX_UPLOAD_BYTES)
+
+                    f_out.write(chunk)
+
+            if total_bytes == 0:
+                raise EmptyDocumentError()
+
+            # Magic bytes validation on initial byte header
+            if suffix in settings.MAGIC_SIGNATURES:
+                expected_sig = settings.MAGIC_SIGNATURES[suffix]
+                if not first_chunk.startswith(expected_sig):
+                    raise MagicBytesMismatchError(suffix)
+
             parsed = await self.parser.parse(str(file_path))
             text = (parsed.text or "").strip()
             if not text:
@@ -88,8 +105,12 @@ class IngestionService:
                 tables=parsed.tables,
             )
         except (UnsupportedFileTypeError, FileTooLargeError, MagicBytesMismatchError, EmptyDocumentError, DocumentExtractionError):
+            if file_path.exists():
+                file_path.unlink(missing_ok=True)
             raise
         except Exception as exc:
+            if file_path.exists():
+                file_path.unlink(missing_ok=True)
             logger.error("Failed to parse document: %s", type(exc).__name__)
             raise DocumentExtractionError("Document parser could not process the provided file safely.")
 
