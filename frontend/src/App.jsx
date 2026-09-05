@@ -10,6 +10,7 @@ import ReportsPage from './components/ReportsPage'
 import StructuredRecordPage from './components/StructuredRecordPage'
 import ReviewVerificationPage from './components/ReviewVerificationPage'
 import TimelineHistoryPage from './components/TimelineHistoryPage'
+import ProcessingEvidencePage from './components/ProcessingEvidencePage'
 import { DEMO_DATA } from './demoData'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -339,6 +340,16 @@ export default function App() {
               openDocument(id)
               setStage('structured')
             }}
+          />
+        )
+      case 'processing':
+        return (
+          <ProcessingEvidencePage
+            activePatient={activePatient}
+            activeDocument={activeDocument}
+            onSelectDocument={openDocument}
+            onNavigateStage={(targetStage) => setStage(targetStage)}
+            loading={loading}
           />
         )
       default:

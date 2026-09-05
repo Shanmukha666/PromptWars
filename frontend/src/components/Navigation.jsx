@@ -7,6 +7,7 @@ export const WORKFLOW_STAGES = [
   { key: 'structured', step: '4', label: 'Structured Record', desc: 'Labs, Entities & Safe Summary' },
   { key: 'review', step: '5', label: 'Review & Verification', desc: 'Audit & Edit Uncertain Fields' },
   { key: 'timeline', step: '6', label: 'Timeline / History', desc: 'Trend Analysis & Comparisons' },
+  { key: 'processing', step: '7', label: 'Processing & Evidence', desc: 'Transparent Pipeline & Observable Evidence' },
 ]
 
 export default function Navigation({ currentStage, onSelectStage, activePatient, activeDocument }) {

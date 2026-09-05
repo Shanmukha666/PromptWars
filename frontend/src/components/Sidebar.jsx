@@ -6,6 +6,7 @@ import {
   IconStructured,
   IconReview,
   IconTimeline,
+  IconProcessing,
   IconSettings,
   IconClose
 } from './Icons'
@@ -17,6 +18,7 @@ export const NAV_ITEMS = [
   { key: 'structured', label: 'Structured Record', icon: IconStructured },
   { key: 'review', label: 'Review', icon: IconReview },
   { key: 'timeline', label: 'Timeline', icon: IconTimeline },
+  { key: 'processing', label: 'Processing & Evidence', icon: IconProcessing },
 ]
 
 export default function Sidebar({

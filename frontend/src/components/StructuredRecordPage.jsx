@@ -188,7 +188,12 @@ export default function StructuredRecordPage({
               Synthesized, verifiable clinical observation table for <strong>{activePatient?.name || 'Selected Patient'}</strong>. Reference ranges and statuses strictly derive from source reports.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {onNavigateStage && (
+              <button className="secondary-btn btn-sm" onClick={() => onNavigateStage('processing')}>
+                Processing & Evidence &rarr;
+              </button>
+            )}
             <button className="secondary-btn btn-sm" onClick={onProceedToReview}>
               Audit & Verify &rarr;
             </button>

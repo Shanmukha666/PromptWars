@@ -7,7 +7,8 @@ const STAGE_LABELS = {
   reports: 'Reports',
   structured: 'Structured Record',
   review: 'Review & Verification',
-  timeline: 'Timeline / History'
+  timeline: 'Timeline / History',
+  processing: 'Processing & Evidence'
 }
 
 export default function Breadcrumbs({
@@ -33,8 +34,8 @@ export default function Breadcrumbs({
     })
   }
 
-  // Active Report context if in structured/review
-  if ((stage === 'structured' || stage === 'review') && activeDocument) {
+  // Active Report context if in structured/review/processing
+  if ((stage === 'structured' || stage === 'review' || stage === 'processing') && activeDocument) {
     items.push({
       label: activeDocument.title || 'Clinical Report',
       onClick: () => onNavigate('reports')

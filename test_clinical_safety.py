@@ -341,5 +341,125 @@ class TestMedLensClinicalSafety(unittest.TestCase):
                 ClinicalSummarySchema.model_validate(candidate)
 
 
+
+    # -------------------------------------------------------------
+    def _create_test_document(self, title: str, text: str):
+        labs = self.analyzer._extract_labs(text)
+        entities = self.analyzer._extract_entities(text)
+        summary = self.analyzer._fallback_document_summary(title, text, {'labs': labs, 'entities': entities})
+        return self.analyzer.store.upsert_document(
+            title=title,
+            source_type='text',
+            source_name='test.txt',
+            raw_text=text,
+            metadata={'words': len(text.split())},
+            extracted={'labs': labs, 'entities': entities, 'sections': []},
+            ai_summary=summary,
+        )
+
+    # -------------------------------------------------------------
+    # Processing & Evidence Pipeline Tests (8-Stage Transparent Workflow)
+    # -------------------------------------------------------------
+    def test_processing_pipeline_returns_exact_8_stages(self):
+        """
+        Test that get_processing_pipeline returns the exact transparent 8-stage sequence:
+        1. Document received
+        2. Text extracted
+        3. Fields detected
+        4. Source ranges linked
+        5. Provenance attached
+        6. Consistency checked
+        7. Summary prepared
+        8. Human review
+        """
+        text = """METROPOLITAN CLINICAL LABORATORIES
+Report ID: LAB-2026-99410 | Patient: Eleanor Vance | DOB: 1968-04-12
+Hemoglobin: 9.2 g/dL (Ref: 12.0 - 16.0 g/dL) [L]
+WBC: 7.8 x10^3/uL (Ref: 4.0 - 11.0 x10^3/uL)
+Platelets: 240 x10^3/uL (Ref: 150 - 450 x10^3/uL)
+Creatinine: 1.4 mg/dL (Ref: < 1.2 mg/dL) [H]
+Glucose: 142 mg/dL
+Patient presents with persistent fatigue for 3 weeks."""
+
+        doc = self._create_test_document("Test Pipeline Report", text)
+        doc_id = doc["document_id"]
+
+        result = self.analyzer.get_processing_pipeline(document_id=doc_id)
+        self.assertIn("pipeline", result)
+        pipeline = result["pipeline"]
+        self.assertEqual(len(pipeline), 8, "Pipeline must contain exactly 8 sequential stages.")
+
+        expected_stages = [
+            (1, "doc_received", "Document received"),
+            (2, "text_extracted", "Text extracted"),
+            (3, "fields_detected", "Fields detected"),
+            (4, "ranges_linked", "Source ranges linked"),
+            (5, "provenance_attached", "Provenance attached"),
+            (6, "consistency_checked", "Consistency checked"),
+            (7, "summary_prepared", "Summary prepared"),
+            (8, "human_review", "Human review"),
+        ]
+
+        for idx, (expected_step, expected_id, expected_title) in enumerate(expected_stages):
+            stage = pipeline[idx]
+            self.assertEqual(stage["step"], expected_step)
+            self.assertEqual(stage["stage_id"], expected_id)
+            self.assertEqual(stage["title"], expected_title)
+            self.assertIn("status", stage)
+            self.assertIn("timestamp", stage)
+            self.assertIn("produced", stage)
+            self.assertIn("warnings", stage)
+            self.assertIn("evidence", stage)
+
+    def test_pipeline_stage_4_source_ranges_linked_metrics(self):
+        """
+        Test that stage 4 (Source ranges linked) correctly shows:
+        - observations evaluated
+        - source ranges found
+        - need review count
+        - warnings for unassessed/missing ranges
+        """
+        text = """METRO LABS
+Hemoglobin: 10.5 g/dL (Ref: 12.0 - 16.0 g/dL)
+Creatinine: 1.5 mg/dL
+Platelets: 220 x10^3/uL (Ref: > 150)"""
+
+        doc = self._create_test_document("Range Linking Test", text)
+        result = self.analyzer.get_processing_pipeline(document_id=doc["document_id"])
+        stage_4 = result["pipeline"][3]
+
+        self.assertEqual(stage_4["title"], "Source ranges linked")
+        self.assertEqual(stage_4["metrics"]["observations_evaluated"], 3)
+        self.assertEqual(stage_4["metrics"]["source_ranges_found"], 2)
+        self.assertEqual(stage_4["metrics"]["need_review"], 1) # Creatinine has no source range
+        self.assertIn("3 observations evaluated", stage_4["produced"])
+        self.assertIn("2 source ranges found", stage_4["produced"])
+        self.assertIn("1 need review", stage_4["produced"])
+        self.assertTrue(any("not_assessed" in w for w in stage_4["warnings"]))
+
+    def test_pipeline_transparency_and_no_chain_of_thought(self):
+        """
+        Test that pipeline stages expose only observable evidence and outputs,
+        and never expose LLM chain-of-thought or pretend separate agents are clinically reasoning.
+        """
+        text = "Hemoglobin: 13.5 g/dL [12.0-16.0]. Patient reports mild fatigue."
+        doc = self._create_test_document("Explainability Test", text)
+        result = self.analyzer.get_processing_pipeline(document_id=doc["document_id"])
+
+        for stage in result["pipeline"]:
+            # Check observable evidence
+            for ev in stage.get("evidence", []):
+                self.assertIn("label", ev)
+                self.assertIn("value", ev)
+                # Ensure no raw chain-of-thought tokens leaked
+                self.assertNotIn("chain_of_thought", ev["label"].lower())
+                self.assertNotIn("agent_thought", ev["label"].lower())
+
+            # Check produced text
+            self.assertTrue(len(stage["produced"]) > 0)
+            self.assertNotIn("i think", stage["produced"].lower())
+            self.assertNotIn("as an ai", stage["produced"].lower())
+
+
 if __name__ == '__main__':
     unittest.main()

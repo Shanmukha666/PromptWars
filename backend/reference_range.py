@@ -336,12 +336,10 @@ def extract_labs_from_report(text: str) -> Dict[str, Dict[str, Any]]:
             raw_range = None
             if range_match:
                 raw_range = range_match.group(0).strip()
-            else:
-                # Check surrounding context in multi-line text
-                context_snippet = text[max(0, match_test.start() - 20): min(len(text), match_test.end() + 100)]
-                snippet_range = range_regex.search(context_snippet[match_test.end() - max(0, match_test.start() - 20):])
-                if snippet_range:
-                    raw_range = snippet_range.group(0).strip()
+            elif line_idx + 1 < len(lines) and re.search(r'^\s*(?:reference|ref|normal)\s*(?:range)?\s*[:=]', lines[line_idx + 1], re.I):
+                next_line_match = range_regex.search(lines[line_idx + 1])
+                if next_line_match:
+                    raw_range = next_line_match.group(0).strip()
 
             parsed_range = parse_source_reference_range(raw_range)
 
