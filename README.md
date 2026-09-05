@@ -109,6 +109,8 @@ The backend is the source of truth in live mode. The browser contains a syntheti
 └── vercel.json                      # Serverless deployment configuration
 ```
 
+`main.py` serves the canonical `backend.app` API. `backend/simple_api.py` is a compatibility facade used by existing consumers and tests; it delegates to the same repositories and services. The separate `api/routes.py` SQLAlchemy/Redis application is retained as explicitly disconnected legacy code and is not registered by `main.py`, the frontend, or the Vercel deployment.
+
 ## Requirements
 
 - Python 3.10 or newer.
@@ -316,6 +318,8 @@ npm install
 npm test
 npm run build
 ```
+
+Optional development tooling is pinned in `requirements-dev.txt` for Black, isort, and Flake8.
 
 The suites cover patient intake, ingestion, extraction, reference-range safety, provenance, API behavior, session isolation, upload limits, performance, accessibility rules, and frontend workflow states. Use synthetic IDs and text in tests; never commit generated uploads, databases, logs, or keys.
 

@@ -4,19 +4,20 @@ Document management, verification, and deletion routes.
 
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.api.dependencies import get_session_id, get_report_repo
 from backend.api.schemas import LabUpdateRequest
 from backend.repositories.report_repository import ReportRepository
+from backend.reference_range import evaluate_source_status
 
 router = APIRouter(tags=["Documents"])
 
 
 @router.get("/documents")
 def list_documents(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     patient_id: Optional[str] = None,
     session_id: str = Depends(get_session_id),
     repo: ReportRepository = Depends(get_report_repo),
@@ -117,21 +118,13 @@ def verify_or_edit_lab(
         return {"status": "success", "action": "mark_incorrect", "document": updated_doc, "observation": updated_item}
 
     val = payload.value if payload.value is not None else existing.get("value", 0.0)
-    r_min = payload.parsed_min
-    r_max = payload.parsed_max
-    if r_min is not None and r_max is not None and r_min <= r_max:
-        ref_range = {"min": r_min, "max": r_max}
-        if val < r_min:
-            stat = "low"
-        elif val > r_max:
-            stat = "high"
-        else:
-            stat = "normal"
-        ref_text = f"Source reference: {payload.reference_range_raw}" if payload.reference_range_raw else f"Source reference: {r_min} - {r_max}"
-    else:
-        ref_range = None
-        stat = "not_assessed"
-        ref_text = "Reference range not available in source report."
+    range_raw = payload.reference_range_raw or existing.get("source_range_raw") or existing.get("reference_range_raw")
+    r_min = payload.parsed_min if payload.parsed_min is not None else existing.get("parsed_min", existing.get("reference_range_low"))
+    r_max = payload.parsed_max if payload.parsed_max is not None else existing.get("parsed_max", existing.get("reference_range_high"))
+    range_operator = existing.get("reference_range_operator")
+    stat, needs_review, parsed_range = evaluate_source_status(val, range_raw, r_min, r_max, range_operator)
+    ref_range = {"min": parsed_range.low, "max": parsed_range.high, "operator": parsed_range.operator} if parsed_range.raw else None
+    ref_text = parsed_range.text
 
     if action == "edit":
         v_status = "edited"
@@ -171,14 +164,19 @@ def verify_or_edit_lab(
 
     updated_item = {
         "test_name": payload.test_name,
+        "display_name": existing.get("display_name", payload.test_name.replace("_", " ").title()),
         "value": val,
         "unit": payload.unit if payload.unit is not None else existing.get("unit", ""),
         "reference_range": ref_range,
+        "reference_range_low": parsed_range.low,
+        "reference_range_high": parsed_range.high,
+        "reference_range_operator": parsed_range.operator,
         "source_range_raw": payload.reference_range_raw or existing.get("source_range_raw"),
         "parsed_min": r_min,
         "parsed_max": r_max,
         "reference_range_text": ref_text,
         "status": stat,
+        "needs_review": needs_review,
         "observation_date": existing.get("observation_date") or (doc.get("created_at", "")[:10] if doc.get("created_at") else None),
         "source_page": payload.source_page or existing.get("source_page", 1),
         "source_snippet": payload.source_snippet or existing.get("source_snippet", ""),

@@ -1,6 +1,10 @@
 """
-Production-Ready API Routes for Dynamic Multi-Agent Clinical System
-FastAPI with async support, comprehensive error handling, and monitoring
+LEGACY / DISCONNECTED API APPLICATION.
+
+The supported MedLens API is assembled by ``backend.app`` and started by
+``main.py``. This module is retained only for historical integrations that
+explicitly import it; it is not registered by the canonical application,
+deployment configuration, or frontend.
 """
 
 from __future__ import annotations

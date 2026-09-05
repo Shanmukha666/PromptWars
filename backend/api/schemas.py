@@ -3,8 +3,8 @@ API request and response DTO schemas.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import List, Optional
+from pydantic import BaseModel, Field, model_validator
 
 
 class PatientCreateRequest(BaseModel):
@@ -32,7 +32,7 @@ class PatientUpdateRequest(BaseModel):
 class LabUpdateRequest(BaseModel):
     document_id: str = Field(min_length=1, max_length=64)
     test_name: str = Field(min_length=1, max_length=100)
-    action: Optional[str] = "verify"
+    action: Optional[str] = Field("verify", pattern="^(verify|edit|add|remove|mark_incorrect)$")
     value: Optional[float] = None
     unit: Optional[str] = Field("", max_length=40)
     reference_range_raw: Optional[str] = Field(None, max_length=100)
@@ -41,8 +41,14 @@ class LabUpdateRequest(BaseModel):
     verification_status: Optional[str] = "verified"
     notes: Optional[str] = Field(None, max_length=1000)
     original_value: Optional[float] = None
-    source_page: Optional[int] = 1
+    source_page: Optional[int] = Field(1, ge=1)
     source_snippet: Optional[str] = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_reference_bounds(self) -> "LabUpdateRequest":
+        if self.parsed_min is not None and self.parsed_max is not None and self.parsed_min > self.parsed_max:
+            raise ValueError("parsed_min cannot be greater than parsed_max")
+        return self
 
 
 class IngestTextRequest(BaseModel):
@@ -66,7 +72,7 @@ class SearchRequest(BaseModel):
 class PipelineRequest(BaseModel):
     document_id: Optional[str] = Field(None, max_length=64)
     question: Optional[str] = Field(None, max_length=500)
-    top_k: int = 4
+    top_k: int = Field(4, ge=1, le=20)
 
 # Compatibility alias
 MultiAgentRequest = PipelineRequest

@@ -11,7 +11,7 @@ from the source report. Never manufactures a missing lower or upper bound.
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass
@@ -236,6 +236,28 @@ def evaluate_clinical_status(
 
     # Ambiguous or unknown comparison semantics
     return 'not_assessed', True
+
+
+def evaluate_source_status(
+    value: Any,
+    raw_text: Optional[str] = None,
+    low: Optional[float] = None,
+    high: Optional[float] = None,
+    operator: Optional[str] = None,
+) -> Tuple[str, bool, ParsedReferenceRange]:
+    """Evaluate a verified observation using the same source-only range rules as extraction."""
+    parsed_range = parse_source_reference_range(raw_text) if raw_text else ParsedReferenceRange(
+        raw=None if low is None and high is None else f'{low} - {high}',
+        low=low,
+        high=high,
+        operator=operator,
+        textual_target=None,
+        is_ambiguous=low is not None and high is not None and low > high,
+        needs_review=low is None and high is None,
+        text='Reference range not available in source report.' if low is None and high is None else f'Source reference: {low} - {high}',
+    )
+    status, needs_review = evaluate_clinical_status(value, parsed_range)
+    return status, needs_review, parsed_range
 
 
 def extract_labs_from_report(text: str) -> Dict[str, Dict[str, Any]]:
