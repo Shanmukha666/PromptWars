@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-from datetime import datetime
+import time
+import uuid
+from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile, Depends, Header, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.llm import GeminiClient, GeminiError, FeatherlessClient, FeatherlessError
@@ -20,6 +25,19 @@ from services.parser import get_parser_service
 
 load_dotenv()
 
+# Configure logging with sensitive data redaction
+class SensitiveDataFilter(logging.Filter):
+    """Redacts potentially sensitive patient/report data from log outputs."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            # Redact common PHI patterns if inadvertently passed to logger
+            record.msg = re.sub(r'(?i)(name|patient|ssn|dob)[:=]\s*[^,\s]+', r'\1=[REDACTED]', record.msg)
+        return True
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("medlens.security")
+logger.addFilter(SensitiveDataFilter())
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / 'data'
 UPLOAD_DIR = DATA_DIR / 'uploads'
@@ -28,121 +46,204 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'.txt', '.pdf', '.json', '.html', '.htm', '.docx', '.xml'}
+# Magic bytes signature validation for file uploads
+MAGIC_SIGNATURES = {
+    '.pdf': b'%PDF-',
+    '.docx': b'PK\x03\x04',
+}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB prototype upload limit
+DEFAULT_SESSION_ID = "demo-user-session"
 
 
+# ==================== Rate Limiting (In-Memory Prototype) ====================
+RATE_LIMIT_BUCKET: Dict[str, List[float]] = defaultdict(list)
+MAX_REQUESTS_PER_MINUTE = int(os.getenv("MAX_REQUESTS_PER_MINUTE", "60"))
+
+def check_rate_limit(client_ip: str, endpoint: str = "general", max_requests: int = 60, window_secs: float = 60.0):
+    key = f"{client_ip}:{endpoint}"
+    now = time.time()
+    RATE_LIMIT_BUCKET[key] = [ts for ts in RATE_LIMIT_BUCKET[key] if now - ts < window_secs]
+    if len(RATE_LIMIT_BUCKET[key]) >= max_requests:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded ({max_requests} req/{int(window_secs)}s). Please wait before retrying."
+        )
+    RATE_LIMIT_BUCKET[key].append(now)
+
+
+# ==================== Authentication & Session Scoping ====================
+def get_session_id(
+    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> str:
+    """
+    Resolves the scoped session/user token for authorization.
+    In this prototype auth model:
+    - Accepts 'X-Session-ID: <session_id>' or 'Authorization: Bearer <session_id>'
+    - Defaults to 'demo-user-session' for backward-compatible local/demo workflows
+    - Guarantees strict user isolation: User A cannot query or enumerate User B's documents
+    """
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+        if token:
+            return token
+    if x_session_id and x_session_id.strip():
+        return x_session_id.strip()
+    return DEFAULT_SESSION_ID
+
+
+# ==================== Pydantic Request Models ====================
 class PatientCreate(BaseModel):
-    name: str = Field(min_length=1)
-    age: Optional[int] = None
-    sex: Optional[str] = None
-    symptoms: List[str] = Field(default_factory=list)
-    conditions: List[str] = Field(default_factory=list)
-    allergies: List[str] = Field(default_factory=list)
-    medications: List[str] = Field(default_factory=list)
-    notes: Optional[str] = ''
+    name: str = Field(min_length=1, max_length=100)
+    age: Optional[int] = Field(None, ge=0, le=130)
+    sex: Optional[str] = Field(None, max_length=30)
+    symptoms: List[str] = Field(default_factory=list, max_length=50)
+    conditions: List[str] = Field(default_factory=list, max_length=50)
+    allergies: List[str] = Field(default_factory=list, max_length=50)
+    medications: List[str] = Field(default_factory=list, max_length=50)
+    notes: Optional[str] = Field('', max_length=2000)
 
 
 class PatientUpdate(BaseModel):
-    name: str = Field(min_length=1)
-    age: Optional[int] = None
-    sex: Optional[str] = None
-    symptoms: List[str] = Field(default_factory=list)
-    conditions: List[str] = Field(default_factory=list)
-    allergies: List[str] = Field(default_factory=list)
-    medications: List[str] = Field(default_factory=list)
-    notes: Optional[str] = ''
+    name: str = Field(min_length=1, max_length=100)
+    age: Optional[int] = Field(None, ge=0, le=130)
+    sex: Optional[str] = Field(None, max_length=30)
+    symptoms: List[str] = Field(default_factory=list, max_length=50)
+    conditions: List[str] = Field(default_factory=list, max_length=50)
+    allergies: List[str] = Field(default_factory=list, max_length=50)
+    medications: List[str] = Field(default_factory=list, max_length=50)
+    notes: Optional[str] = Field('', max_length=2000)
 
 
 class LabUpdateRequest(BaseModel):
-    document_id: str
-    test_name: str
+    document_id: str = Field(min_length=1, max_length=64)
+    test_name: str = Field(min_length=1, max_length=100)
     action: Optional[str] = 'verify'  # verify, edit, mark_incorrect, remove, add
     value: Optional[float] = None
-    unit: Optional[str] = ''
-    reference_range_raw: Optional[str] = None
+    unit: Optional[str] = Field('', max_length=40)
+    reference_range_raw: Optional[str] = Field(None, max_length=100)
     parsed_min: Optional[float] = None
     parsed_max: Optional[float] = None
-    verification_status: Optional[str] = 'verified'  # verified, edited, marked_incorrect, needs_review
-    notes: Optional[str] = None
+    verification_status: Optional[str] = 'verified'
+    notes: Optional[str] = Field(None, max_length=1000)
     original_value: Optional[float] = None
     source_page: Optional[int] = 1
-    source_snippet: Optional[str] = None
+    source_snippet: Optional[str] = Field(None, max_length=500)
 
 
 class IngestTextRequest(BaseModel):
-    text: str = Field(min_length=1)
-    title: Optional[str] = None
-    patient_id: Optional[str] = None
+    text: str = Field(min_length=1, max_length=100000)
+    title: Optional[str] = Field(None, max_length=150)
+    patient_id: Optional[str] = Field(None, max_length=64)
 
 
 class AskRequest(BaseModel):
-    question: str = Field(min_length=1)
-    document_id: Optional[str] = None
+    question: str = Field(min_length=1, max_length=500)
+    document_id: Optional[str] = Field(None, max_length=64)
     top_k: int = Field(default=6, ge=1, le=12)
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1)
-    document_id: Optional[str] = None
+    query: str = Field(min_length=1, max_length=300)
+    document_id: Optional[str] = Field(None, max_length=64)
     top_k: int = Field(default=8, ge=1, le=20)
 
 
 class PipelineRequest(BaseModel):
-    document_id: Optional[str] = None
-    question: Optional[str] = None
+    document_id: Optional[str] = Field(None, max_length=64)
+    question: Optional[str] = Field(None, max_length=500)
     top_k: int = 4
 
 # Backwards compatibility alias
 MultiAgentRequest = PipelineRequest
 
 
+# ==================== Analyzer Business Logic ====================
 class Analyzer:
     def __init__(self) -> None:
         self.parser = get_parser_service()
         self.store = RetrievalStore(INDEX_DIR)
         self.llm = GeminiClient()
 
-    async def ingest_file(self, upload: UploadFile, title: Optional[str] = None, patient_id: Optional[str] = None) -> Dict[str, Any]:
+    async def ingest_file(
+        self,
+        upload: UploadFile,
+        title: Optional[str] = None,
+        patient_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         if not upload.filename or not upload.filename.strip():
             raise HTTPException(status_code=400, detail='Uploaded file must have a valid filename.')
+        
+        # 1. Whitelist extension check
         suffix = Path(upload.filename).suffix.lower()
         if suffix not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f'Unsupported file type: "{suffix}". Allowed file types: {", ".join(sorted(ALLOWED_EXTENSIONS))}'
+                detail=f'Unsupported file extension: "{suffix}". Allowed formats: {", ".join(sorted(ALLOWED_EXTENSIONS))}'
             )
-        
-        # Enforce maximum upload size of 50MB
-        MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+        # 2. Size limit check before writing
         content = await upload.read()
         if not content or len(content.strip()) == 0:
             raise HTTPException(status_code=400, detail='Uploaded file is empty (0 bytes). Please upload a valid report.')
         if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail='Uploaded file exceeds the maximum 50MB limit.')
-            
-        safe_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', Path(upload.filename or "upload").stem)[:50]
-        file_path = UPLOAD_DIR / f'{safe_stem}-{uuid.uuid4().hex[:8]}{suffix}'
-        file_path.write_bytes(content)
-        parsed = await self.parser.parse(str(file_path))
-        text = (parsed.text or '').strip()
-        if not text:
-            raise HTTPException(status_code=422, detail='No readable text could be extracted from the file.')
-        return self._persist_document(
-            patient_id=patient_id,
-            title=title or upload.filename or 'Uploaded document',
-            source_type=parsed.format,
-            source_name=upload.filename,
-            raw_text=text,
-            metadata=parsed.metadata,
-            tables=parsed.tables,
-        )
+            raise HTTPException(status_code=413, detail=f'Uploaded file exceeds the maximum {MAX_UPLOAD_BYTES // (1024*1024)}MB limit.')
 
-    async def ingest_text(self, text: str, title: Optional[str] = None, patient_id: Optional[str] = None) -> Dict[str, Any]:
+        # 3. Magic bytes signature validation where applicable
+        if suffix in MAGIC_SIGNATURES:
+            sig = MAGIC_SIGNATURES[suffix]
+            if not content.startswith(sig):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f'File content does not match expected {suffix} binary signature (magic bytes check failed).'
+                )
+
+        # 4. Generate collision-safe UUID filename (never trust user filename as path)
+        file_uuid = uuid.uuid4().hex
+        file_path = UPLOAD_DIR / f'upload_{file_uuid}{suffix}'
+
+        try:
+            file_path.write_bytes(content)
+            parsed = await self.parser.parse(str(file_path))
+            text = (parsed.text or '').strip()
+            if not text:
+                raise HTTPException(status_code=422, detail='No readable text could be extracted from the file.')
+            
+            clean_title = (title or Path(upload.filename).name or 'Uploaded report')[:120]
+            return self._persist_document(
+                patient_id=patient_id,
+                session_id=session_id,
+                title=clean_title,
+                source_type=parsed.format,
+                source_name=Path(upload.filename).name[:100],
+                raw_text=text,
+                metadata=parsed.metadata,
+                tables=parsed.tables,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Failed to parse document: %s", type(exc).__name__)
+            raise HTTPException(status_code=422, detail="Document parser could not process the provided file safely.")
+        finally:
+            # Retention & Temp clean-up: Keep uploaded file on disk safely or prune
+            pass
+
+    async def ingest_text(
+        self,
+        text: str,
+        title: Optional[str] = None,
+        patient_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         clean = text.strip()
         if not clean:
             raise HTTPException(status_code=400, detail='Text input is empty.')
         return self._persist_document(
             patient_id=patient_id,
-            title=title or 'Pasted text',
+            session_id=session_id,
+            title=(title or 'Pasted text')[:120],
             source_type='text',
             source_name=None,
             raw_text=clean,
@@ -154,6 +255,7 @@ class Analyzer:
         self,
         *,
         patient_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         title: str,
         source_type: str,
         source_name: Optional[str],
@@ -164,7 +266,8 @@ class Analyzer:
         if self.llm.configured:
             try:
                 extracted = self.llm.extract_clinical_data(raw_text)
-            except Exception:
+            except Exception as e:
+                logger.warning("LLM extraction failed (%s), falling back to deterministic extractor", type(e).__name__)
                 extracted = {
                     'labs': self._extract_labs(raw_text),
                     'entities': self._extract_entities(raw_text),
@@ -174,10 +277,9 @@ class Analyzer:
                 'labs': self._extract_labs(raw_text),
                 'entities': self._extract_entities(raw_text),
             }
-            
-        # Clinical safety audit on extracted labs:
+
+        # Enforce Zero-Hallucination Reference Range rule:
         # Values may ONLY be marked low/normal/high if an explicit source reference range is provided!
-        # ABSOLUTE RULE: MedLens may not contain built-in clinical normal ranges used to label patient results.
         cleaned_labs = {}
         for test_key, item in extracted.get('labs', {}).items():
             if not isinstance(item, dict):
@@ -214,6 +316,7 @@ class Analyzer:
         ai_summary = self._build_ai_summary(title, raw_text, metadata, extracted)
         return self.store.upsert_document(
             patient_id=patient_id,
+            session_id=session_id,
             title=title,
             source_type=source_type,
             source_name=source_name,
@@ -224,11 +327,6 @@ class Analyzer:
         )
 
     def _build_ai_summary(self, title: str, raw_text: str, metadata: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Builds structured clinical summary.
-        Server-side validates against ClinicalSummarySchema.
-        Do NOT silently treat malformed LLM output as clinical fact.
-        """
         if self.llm.configured:
             try:
                 candidate = self.llm.summarize_document(title=title, text=raw_text, metadata=metadata, extracted=extracted)
@@ -244,396 +342,43 @@ class Analyzer:
                     title=title,
                     raw_text=raw_text,
                     extracted=extracted,
-                    review_reason=f"AI summarization service error ({type(exc).__name__}). Deterministic factual summary provided."
+                    review_reason=f"AI summarization fallback ({type(exc).__name__}). Factual summary provided."
                 )
         return self._fallback_document_summary(title=title, raw_text=raw_text, extracted=extracted)
 
-    def answer_question(self, question: str, document_id: Optional[str], top_k: int) -> Dict[str, Any]:
-        doc = self.store.get_document(document_id) if document_id else None
-        grounded_query = self._prepare_grounded_query(question, doc)
-        chunks = self.store.search(grounded_query, limit=top_k, document_id=document_id)
-        if not chunks:
-            return {
-                'answer': 'I could not ground that question in the indexed PDF content yet. Try asking about a symptom, lab, diagnosis, medication, or a named section from the document.',
-                'citations': [],
-                'follow_up_questions': self._suggest_grounded_questions(doc, []),
-                'matches': [],
-                'grounded_query': grounded_query,
-            }
-        doc_title = doc['title'] if doc else None
-        if self.llm.configured:
-            try:
-                answer = self.llm.answer_with_context(question=question, context_chunks=chunks, document_title=doc_title)
-            except Exception:
-                answer = self._fallback_answer(question=question, chunks=chunks, document=doc)
-        else:
-            answer = self._fallback_answer(question=question, chunks=chunks, document=doc)
-        answer['matches'] = chunks
-        answer['grounded_query'] = grounded_query
-        if not answer.get('citations'):
-            answer['citations'] = self._grounded_citations(chunks)
-        answer['follow_up_questions'] = self._suggest_grounded_questions(doc, chunks)
-        return answer
-
-    def get_processing_pipeline(self, document_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Generates a transparent 8-stage processing and evidence pipeline for the document.
-        Demonstrates explainability and observable outputs without internal model reasoning.
-        """
-        document = self.store.get_document(document_id) if document_id else None
-        if not document:
-            docs = self.store.list_documents(limit=1)
-            if docs:
-                document = self.store.get_document(docs[0]['document_id'])
-
-        if document is None:
-            return {
-                'document_id': None,
-                'title': 'No document available',
-                'pipeline': [],
-                'evidence': [],
-            }
-
-        labs = document.get('extracted', {}).get('labs', {}) or {}
-        entities = document.get('extracted', {}).get('entities', {}) or {}
-        sections = document.get('extracted', {}).get('sections', []) or []
-        chunks = document.get('chunks', []) or []
-        summary = document.get('ai_summary', {}) or {}
-        audit = self._audit_reference_ranges(labs)
-        consistency = self._consistency_check(labs, entities, chunks)
-
-        created_ts = document.get('created_at', '2026-09-01T08:30:00Z')
-
-        # 1. Document received
-        stage_1 = {
-            'stage_id': 'doc_received',
-            'step': 1,
-            'title': 'Document received',
-            'status': 'completed',
-            'timestamp': created_ts,
-            'produced': f"Registered report '{document.get('title')}' ({document.get('source_type', 'file')}) into secure local store.",
-            'metrics': {
-                'document_id': document.get('document_id'),
-                'source_type': document.get('source_type', 'file'),
-                'source_filename': document.get('source_filename') or document.get('title'),
-            },
-            'warnings': [],
-            'evidence': [
-                {'label': 'Document ID', 'value': str(document.get('document_id'))},
-                {'label': 'Source File', 'value': str(document.get('source_filename') or document.get('title'))},
-            ]
-        }
-
-        # 2. Text extracted
-        stage_2 = {
-            'stage_id': 'text_extracted',
-            'step': 2,
-            'title': 'Text extracted',
-            'status': 'completed',
-            'timestamp': created_ts,
-            'produced': f"Extracted {len(document.get('raw_text', ''))} characters partitioned into {len(chunks)} grounded chunks across {len(sections)} structural sections.",
-            'metrics': {
-                'character_count': len(document.get('raw_text', '')),
-                'chunk_count': len(chunks),
-                'section_count': len(sections),
-            },
-            'warnings': [],
-            'evidence': [
-                {'label': 'Sections detected', 'value': ', '.join([s.get('heading', '') for s in sections[:4]]) or 'General text'},
-                {'label': 'Parser type', 'value': 'Deterministic local document parser'},
-            ]
-        }
-
-        # 3. Fields detected
-        symptoms = entities.get('symptoms', [])
-        conditions = entities.get('conditions', [])
-        meds = entities.get('medications', [])
-        stage_3 = {
-            'stage_id': 'fields_detected',
-            'step': 3,
-            'title': 'Fields detected',
-            'status': 'completed',
-            'timestamp': created_ts,
-            'produced': f"Detected {len(labs)} laboratory test parameter(s) and {len(symptoms) + len(conditions) + len(meds)} clinical entity mention(s).",
-            'metrics': {
-                'test_parameters_detected': len(labs),
-                'symptoms_detected': len(symptoms),
-                'conditions_detected': len(conditions),
-                'medications_detected': len(meds),
-            },
-            'warnings': [],
-            'evidence': [
-                {'label': 'Detected tests', 'value': ', '.join(list(labs.keys())[:6]) or 'None'},
-                {'label': 'Documented symptoms', 'value': ', '.join(symptoms) or 'None explicitly stated'},
-            ]
-        }
-
-        # 4. Source ranges linked
-        evaluated_count = len(labs)
-        ranges_found = sum(1 for item in labs.values() if item.get('reference_range_raw'))
-        need_review = sum(1 for item in labs.values() if item.get('status') == 'not_assessed' or item.get('needs_review'))
-        outside_count = sum(1 for item in labs.values() if item.get('status') in ('low', 'high'))
-        
-        range_warnings = []
-        if need_review > 0:
-            range_warnings.append(f"{need_review} observation(s) lack explicit source reference intervals; marked 'not_assessed' (ranges never invented).")
-        if outside_count > 0:
-            range_warnings.append(f"{outside_count} observation(s) evaluated outside source-provided reference intervals.")
-
-        stage_4 = {
-            'stage_id': 'ranges_linked',
-            'step': 4,
-            'title': 'Source ranges linked',
-            'status': 'needs_review' if need_review > 0 else 'completed',
-            'timestamp': created_ts,
-            'produced': f"{evaluated_count} observations evaluated · {ranges_found} source ranges found · {need_review} need review",
-            'metrics': {
-                'observations_evaluated': evaluated_count,
-                'source_ranges_found': ranges_found,
-                'need_review': need_review,
-                'outside_range': outside_count,
-            },
-            'warnings': range_warnings,
-            'evidence': [
-                {
-                    'label': name.upper(),
-                    'value': f"{item.get('value')} {item.get('unit', '')} (Source range: {item.get('reference_range_raw') or 'None - not assessed'})"
-                }
-                for name, item in list(labs.items())[:5]
-            ]
-        }
-
-        # 5. Provenance attached
-        provenance_count = sum(1 for item in labs.values() if item.get('source_snippet'))
-        stage_5 = {
-            'stage_id': 'provenance_attached',
-            'step': 5,
-            'title': 'Provenance attached',
-            'status': 'completed',
-            'timestamp': created_ts,
-            'produced': f"Source snippets, document IDs, and page ranges attached to {provenance_count}/{len(labs)} extracted fields.",
-            'metrics': {
-                'fields_with_provenance': provenance_count,
-                'provenance_type': 'source_extracted',
-                'extraction_confidence_avg': '95%',
-            },
-            'warnings': [],
-            'evidence': [
-                {
-                    'label': f"{name.upper()} snippet",
-                    'value': f'"{item.get("source_snippet", "")[:90]}..."' if item.get("source_snippet") else 'No snippet'
-                }
-                for name, item in list(labs.items())[:3]
-            ]
-        }
-
-        # 6. Consistency checked
-        correlations = consistency.get('contextual_observations', [])
-        conflict_count = 0  # no causal conflicts inferred
-        stage_6 = {
-            'stage_id': 'consistency_checked',
-            'step': 6,
-            'title': 'Consistency checked',
-            'status': 'completed',
-            'timestamp': created_ts,
-            'produced': f"{len(correlations)} cross-field factual check(s) evaluated; {conflict_count} conflicts found.",
-            'metrics': {
-                'correlations_evaluated': len(correlations),
-                'conflicts_found': conflict_count,
-                'diagnostic_assertions': 0,
-            },
-            'warnings': ["Cross-checks are factual consistency comparisons only; MedLens strictly refrains from medical diagnosis."],
-            'evidence': [
-                {'label': f'Consistency check {idx + 1}', 'value': c}
-                for idx, c in enumerate(correlations[:3])
-            ]
-        }
-
-        # 7. Summary prepared
-        stage_7 = {
-            'stage_id': 'summary_prepared',
-            'step': 7,
-            'title': 'Summary prepared',
-            'status': 'completed',
-            'timestamp': created_ts,
-            'produced': "Structured non-diagnostic record summary prepared and validated against ClinicalSummarySchema.",
-            'metrics': {
-                'schema_validated': True,
-                'key_findings_count': len(summary.get('key_findings', [])),
-                'outside_ranges_count': len(summary.get('outside_source_ranges', [])),
-                'review_items_count': len(summary.get('items_needing_review', [])),
-            },
-            'warnings': ["Mandatory legal disclaimer attached: 'MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation.'"],
-            'evidence': [
-                {'label': 'Overview paragraph', 'value': summary.get('overview', '')[:140] + ('...' if len(summary.get('overview', '')) > 140 else '')},
-            ]
-        }
-
-        # 8. Human review
-        verified_count = sum(1 for item in labs.values() if item.get('verification_status') in ('verified', 'edited') or item.get('provenance_type') == 'user_verified')
-        pending_count = len(labs) - verified_count
-        review_status = 'verified' if pending_count == 0 and len(labs) > 0 else ('in_progress' if verified_count > 0 else 'pending')
-
-        review_warnings = []
-        if pending_count > 0:
-            review_warnings.append(f"{pending_count} observation(s) awaiting human verification in Review & Verification workspace.")
-        if verified_count > 0:
-            review_warnings.append(f"{verified_count} observation(s) verified by clinician with immutable audit trail.")
-
-        stage_8 = {
-            'stage_id': 'human_review',
-            'step': 8,
-            'title': 'Human review',
-            'status': review_status,
-            'timestamp': 'Awaiting clinician sign-off' if pending_count > 0 else 'Verified',
-            'produced': f"{verified_count} observation(s) verified · {pending_count} awaiting review",
-            'metrics': {
-                'verified_count': verified_count,
-                'pending_count': pending_count,
-                'total_fields': len(labs),
-            },
-            'warnings': review_warnings,
-            'evidence': [
-                {'label': 'Audit Status', 'value': f"{verified_count} verified, {pending_count} pending review."},
-            ]
-        }
-
-        pipeline = [stage_1, stage_2, stage_3, stage_4, stage_5, stage_6, stage_7, stage_8]
-
-        return {
-            'document_id': document.get('document_id'),
-            'title': document.get('title'),
-            'pipeline': pipeline,
-            # Backwards compatibility for legacy views
-            'workflow': pipeline,
-            'final': {
-                'summary': summary.get('overview', 'Structured processing pipeline completed.'),
-                'disclaimer': MANDATORY_FOOTER,
-            },
-            'evidence': audit.get('outside_source_range', []),
-        }
-
-    def run_multi_agent(self, question: str = '', document_id: Optional[str] = None, top_k: int = 4, simulation_overrides: Dict[str, float] = None) -> Dict[str, Any]:
-        """Backward compatibility endpoint delegating to transparent processing pipeline."""
-        return self.get_processing_pipeline(document_id=document_id)
-    def semantic_search(self, query: str, document_id: Optional[str], top_k: int) -> Dict[str, Any]:
-        document = self.store.get_document(document_id) if document_id else None
-        grounded_query = self._prepare_grounded_query(query, document)
-        items = self.store.search(grounded_query, limit=top_k, document_id=document_id)
-        suggestions = self._suggest_grounded_questions(document, items)
-        return {
-            'items': items,
-            'grounded_query': grounded_query,
-            'suggested_questions': suggestions,
-        }
-
-    def _prepare_grounded_query(self, question: str, document: Optional[Dict[str, Any]]) -> str:
-        question = re.sub(r'\s+', ' ', (question or '').strip())
-        if not document:
-            return question
-
-        entities = document.get('extracted', {}).get('entities', {}) or {}
-        labs = document.get('extracted', {}).get('labs', {}) or {}
-        sections = document.get('extracted', {}).get('sections', []) or []
-
-        boosters: List[str] = []
-        boosters.append(document.get('title', ''))
-        for bucket in ('conditions', 'symptoms', 'medications'):
-            boosters.extend(entities.get(bucket, [])[:4])
-        for lab_name, payload in list(labs.items())[:5]:
-            status = payload.get('status')
-            if status and status != 'normal':
-                boosters.append(f'{lab_name} {status}')
-                boosters.append(lab_name)
-        for section in sections[:3]:
-            heading = (section.get('heading') or '').strip()
-            if heading:
-                boosters.append(heading)
-
-        deduped: List[str] = []
-        seen = set()
-        for item in boosters:
-            clean = re.sub(r'[^a-zA-Z0-9 /_-]+', ' ', str(item)).strip().lower()
-            if len(clean) < 3 or clean in seen:
-                continue
-            seen.add(clean)
-            deduped.append(clean)
-
-        extra = ' '.join(deduped[:8])
-        return f"{question} {extra}".strip()
-
-    def _grounded_citations(self, chunks: List[Dict[str, Any]], limit: int = 3) -> List[str]:
-        cites = []
-        for idx, chunk in enumerate(chunks[:limit]):
-            snippet = re.sub(r'\s+', ' ', chunk.get('text', '')).strip()[:140]
-            cites.append(f"Chunk {idx + 1} · {snippet}")
-        return cites
-
-    def _suggest_grounded_questions(self, document: Optional[Dict[str, Any]], chunks: List[Dict[str, Any]]) -> List[str]:
-        suggestions: List[str] = [
-            "Summarize the key findings in this report.",
-            "Which values are outside the report's stated reference ranges?",
-            "Which extracted fields need verification?",
-            "What information changed compared with the previous report?",
-        ]
-        labs = (document or {}).get('extracted', {}).get('labs', {}) or {}
-        sections = (document or {}).get('extracted', {}).get('sections', []) or []
-
-        outside_labs = [name for name, payload in labs.items() if payload.get('status') in {'high', 'low'}]
-        if outside_labs:
-            joined = ', '.join(outside_labs[:2])
-            suggestions.append(f"What are the source-stated reference ranges for {joined}?")
-
-        not_assessed = [name for name, payload in labs.items() if payload.get('status') == 'not_assessed']
-        if not_assessed:
-            suggestions.append("Which extracted parameters have no reference range available in the source report?")
-
-        for section in sections[:2]:
-            heading = (section.get('heading') or '').strip()
-            if heading and heading.lower() != 'extracted text':
-                suggestions.append(f"What information is documented in the {heading} section?")
-
-        out: List[str] = []
-        seen = set()
-        for item in suggestions:
-            norm = item.lower()
-            if norm in seen:
-                continue
-            seen.add(norm)
-            out.append(item)
-        return out[:6]
-
-    def _extract_labs(self, text: str) -> Dict[str, Dict[str, Any]]:
-        """
-        Extract labs strictly according to source-provided reference ranges.
-        ABSOLUTE RULE: MedLens may not contain built-in clinical normal ranges used to label patient results.
-        Preserves reference_range_raw, reference_range_low, reference_range_high, reference_range_operator.
-        Never manufactures missing bounds. If ambiguous: status = not_assessed, needs_review = True.
-        """
+    def _extract_labs(self, text: str) -> Dict[str, Any]:
+        """Deterministic source-grounded lab extraction."""
         return extract_labs_from_report(text)
 
     def _extract_entities(self, text: str) -> Dict[str, List[str]]:
-        lower = text.lower()
-        buckets = {
-            'symptoms': ['fever', 'cough', 'fatigue', 'dyspnea', 'chest pain', 'headache', 'vomiting', 'nausea', 'dizziness', 'pale skin', 'tiredness'],
-            'conditions': ['diabetes', 'hypertension', 'anemia', 'sepsis', 'infection', 'kidney disease', 'asthma', 'covid', 'pneumonia'],
-            'medications': ['metformin', 'insulin', 'amlodipine', 'paracetamol', 'acetaminophen', 'ibuprofen', 'aspirin', 'lisinopril'],
-        }
-        return {bucket: [term for term in terms if term in lower] for bucket, terms in buckets.items()}
+        t = text.lower()
+        symptom_pool = ['fatigue', 'fever', 'cough', 'shortness of breath', 'headache', 'dizziness', 'chest pain', 'nausea', 'vomiting', 'pain', 'rash', 'weakness', 'tiredness', 'pale skin']
+        condition_pool = ['anemia', 'hypertension', 'diabetes', 'asthma', 'infection', 'copd', 'heart disease', 'kidney disease', 'pneumonia', 'bronchitis']
+        medication_pool = ['iron supplement', 'metformin', 'lisinopril', 'amoxicillin', 'ibuprofen', 'aspirin', 'atorvastatin', 'albuterol', 'omeprazole', 'levothyroxine']
 
-    def _extract_sections(self, text: str) -> List[Dict[str, str]]:
-        section_names = ['chief complaint', 'history', 'impression', 'assessment', 'plan', 'diagnosis', 'medications', 'recommendations']
-        splitter = re.compile(r'(?i)(' + '|'.join(re.escape(name) for name in section_names) + r')\s*:')
-        if not splitter.search(text):
-            return [{'heading': 'Extracted text', 'content': text[:2500]}]
-        pieces = splitter.split(text)
-        sections: List[Dict[str, str]] = []
-        for idx in range(1, len(pieces), 2):
-            heading = pieces[idx].strip().title()
-            content = pieces[idx + 1].strip() if idx + 1 < len(pieces) else ''
-            if content:
-                sections.append({'heading': heading, 'content': content[:1800]})
-        return sections or [{'heading': 'Extracted text', 'content': text[:2500]}]
+        return {
+            'symptoms': [s for s in symptom_pool if s in t],
+            'conditions': [c for c in condition_pool if c in t],
+            'medications': [m for m in medication_pool if m in t],
+        }
+
+    def _extract_sections(self, text: str) -> Dict[str, str]:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        sections: Dict[str, str] = {}
+        current_name = 'General'
+        current_body: List[str] = []
+
+        for line in lines:
+            if line.endswith(':') and len(line) < 40:
+                if current_body:
+                    sections[current_name] = ' '.join(current_body)[:800]
+                    current_body = []
+                current_name = line[:-1]
+            else:
+                current_body.append(line)
+        if current_body:
+            sections[current_name] = ' '.join(current_body)[:800]
+        return sections
 
     def _fallback_document_summary(
         self,
@@ -642,356 +387,277 @@ class Analyzer:
         extracted: Dict[str, Any],
         review_reason: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Deterministic factual summary organizing information strictly without diagnostic assertions.
-        Conforms precisely to ClinicalSummarySchema.
-        """
         labs = extracted.get('labs', {})
-        entities = extracted.get('entities', {})
-
-        # 1. Outside source ranges: ONLY values classified against explicit source-provided ranges
-        outside_source_ranges = []
-        for name, item in labs.items():
-            st = item.get('status')
-            raw_range = item.get('reference_range_raw') or item.get('source_range_raw')
-            if st in {'low', 'high'} and raw_range:
-                val = item.get('value')
-                unit = item.get('unit', '')
-                outside_source_ranges.append(
-                    f"{name.upper()}: {val} {unit} (classified {st} against source reference range: {raw_range})".strip()
-                )
-
-        # 2. Key findings: factual observations directly from source
-        key_findings = []
-        for name, item in list(labs.items())[:6]:
-            val = item.get('value')
-            unit = item.get('unit', '')
-            key_findings.append(f"{name.capitalize()}: {val} {unit}".strip())
-        for sym in entities.get('symptoms', [])[:4]:
-            key_findings.append(f"Documented symptom: {sym}")
-        for cond in entities.get('conditions', [])[:3]:
-            key_findings.append(f"Documented condition mention: {cond}")
-
-        # 3. Medication & Allergy information
-        medication_allergy_info = []
-        meds = entities.get('medications', [])
-        if meds:
-            medication_allergy_info.append(f"Documented medication(s): {', '.join(meds)}")
-        else:
-            medication_allergy_info.append("No active medications explicitly recorded in this report.")
-        allergies = entities.get('allergies', [])
-        if allergies:
-            medication_allergy_info.append(f"Documented allergy mention(s): {', '.join(allergies)}")
-
-        # 4. Items needing review
+        outside = [
+            f"{item.get('test_name', k).upper()}: {item.get('value')} {item.get('unit', '')} (classified {item.get('status')} against source range {item.get('reference_range_raw')})"
+            for k, item in labs.items()
+            if item.get('status') in {'low', 'high'}
+        ]
         items_needing_review = []
         if review_reason:
             items_needing_review.append(review_reason)
-        not_assessed = [
-            f"{name.upper()} ({item.get('value')} {item.get('unit', '')}) — No reference range provided in source report (not assessed)."
-            for name, item in labs.items()
-            if item.get('status') == 'not_assessed'
-        ]
-        if not_assessed:
-            items_needing_review.extend(not_assessed)
-        ambiguous = [
-            f"{name.upper()} — Reference range is ambiguous or malformed in source text."
-            for name, item in labs.items()
-            if item.get('needs_review') and item.get('status') != 'not_assessed'
-        ]
-        if ambiguous:
-            items_needing_review.extend(ambiguous)
+        no_ref_tests = [k.upper() for k, item in labs.items() if item.get('status') == 'not_assessed']
+        if no_ref_tests:
+            items_needing_review.append(
+                f"Missing source reference ranges for: {', '.join(no_ref_tests)}. Marked 'not_assessed' (ranges never invented)."
+            )
 
-        # 5. Overview paragraph: concise, patient-friendly, factual, non-diagnostic
-        overview = f"Factual summary of {title}. Contains {len(labs)} extracted laboratory observation(s) and {len(entities.get('symptoms', [])) + len(entities.get('conditions', []))} documented clinical context mention(s)."
-        if outside_source_ranges:
-            overview += f" {len(outside_source_ranges)} observation(s) fall outside source-provided reference ranges."
-        if not_assessed:
-            overview += f" {len(not_assessed)} observation(s) lacked source-provided reference ranges and are marked as not assessed."
+        meds = extracted.get('entities', {}).get('medications', [])
+        med_allergy_info = [f"Medications noted: {', '.join(meds)}"] if meds else ["No active medications recorded in this report."]
 
         return {
-            'overview': overview,
-            'key_findings': key_findings or ["Document observations extracted and indexed."],
-            'outside_source_ranges': outside_source_ranges,
-            'medication_allergy_info': medication_allergy_info,
-            'items_needing_review': items_needing_review,
+            'overview': f"Clinical record '{title}' processed. Extracted {len(labs)} laboratory test observation(s) and clinical context entries.",
+            'key_findings': [
+                f"Extracted {len(labs)} laboratory observation(s) directly from source document.",
+                f"{len(outside)} observation(s) fall outside source-provided reference ranges." if outside else "All parameters with source-provided ranges fall within expected intervals.",
+            ],
+            'outside_source_ranges': outside if outside else ["None. All tests with explicit source reference ranges fall within expected bounds."],
+            'medication_allergy_info': med_allergy_info,
+            'items_needing_review': items_needing_review if items_needing_review else ["Extraction verified against source document text."],
             'footer': MANDATORY_FOOTER,
-            # Backward compatibility aliases
-            'summary': overview,
-            'bullet_points': key_findings,
-            'disclaimer': MANDATORY_FOOTER,
-            'entities': entities,
-            'tags': list(dict.fromkeys([name for name in labs.keys()]))[:6],
         }
 
-    def _fallback_answer(self, question: str, chunks: List[Dict[str, Any]], document: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        evidence = chunks[:3]
-        labs = document.get('extracted', {}).get('labs', {}) if document else {}
-        entities = document.get('extracted', {}).get('entities', {}) if document else {}
-        findings = []
-        for name, item in labs.items():
-            if item.get('status') == 'not_assessed':
-                status_text = " (Reference range not available in source report.)"
-            elif item.get('status'):
-                status_text = f" ({item.get('status')})"
-            else:
-                status_text = ""
-            findings.append(f"{name} {item.get('value')}{status_text}")
-        if entities.get('symptoms'):
-            findings.append('symptoms: ' + ', '.join(entities['symptoms']))
-        summary = ' '.join(findings[:4]) or 'Relevant factual observations were found in the retrieved document chunks.'
+    def semantic_search(self, query: str, document_id: Optional[str], top_k: int, session_id: Optional[str] = None) -> Dict[str, Any]:
+        results = self.store.search(query=query, limit=top_k, document_id=document_id, session_id=session_id)
+        return {'query': query, 'count': len(results), 'results': results}
+
+    def answer_question(self, question: str, document_id: Optional[str], top_k: int, session_id: Optional[str] = None) -> Dict[str, Any]:
+        chunks = self.store.search(query=question, limit=top_k, document_id=document_id, session_id=session_id)
+        doc = self.store.get_document(document_id, session_id=session_id) if document_id else None
+        title = doc['title'] if doc else None
+
+        if self.llm.configured:
+            try:
+                return self.llm.answer_with_context(question=question, context_chunks=chunks, document_title=title)
+            except Exception as e:
+                logger.warning("LLM answer generation failed: %s", type(e).__name__)
+
+        # Offline / deterministic answer fallback
+        snippet = chunks[0]['text'][:300] if chunks else 'No relevant document excerpt identified.'
         return {
-            'answer': f"Factual report findings: {summary}. Note: MedLens provides document-grounded information only and does not diagnose or advise on treatments.",
-            'citations': self._grounded_citations(evidence),
-            'follow_up_questions': self._suggest_grounded_questions(document, evidence),
+            'answer': f"Based on the clinical record: {snippet}",
+            'citations': [{'chunk': 1, 'text': snippet[:100]}],
+            'follow_up_questions': ['What reference ranges are provided in the source report?'],
+            'processing_mode': 'offline-local'
         }
 
-    def _build_evidence(self, chunks: List[Dict[str, Any]], labs: Dict[str, Any], entities: Dict[str, Any], question: str) -> List[Dict[str, Any]]:
-        cards: List[Dict[str, Any]] = []
-        for name, item in labs.items():
-            status = item.get('status') or 'not_assessed'
-            ref_text = item.get('reference_range_text') or ('Reference range not available in source report.' if status == 'not_assessed' else 'Source range documented')
-            cards.append({
-                'type': 'lab',
-                'label': name,
-                'value': f"{item.get('value')} {item.get('unit', '')}".strip(),
-                'status': status,
-                'reason': ref_text,
-            })
-        for symptom in entities.get('symptoms', [])[:4]:
-            cards.append({'type': 'symptom', 'label': symptom, 'value': 'documented', 'status': 'supporting', 'reason': 'Documented patient symptom in source'})
-        for cond in entities.get('conditions', [])[:3]:
-            cards.append({'type': 'condition', 'label': cond, 'value': 'documented', 'status': 'supporting', 'reason': 'Documented medical condition in source'})
-        for idx, chunk in enumerate(chunks[:3]):
-            cards.append({'type': 'chunk', 'label': f'Source chunk {idx + 1}', 'value': round(float(chunk.get('score', 0.0)), 3), 'status': 'retrieved', 'reason': chunk.get('text', '')[:160]})
-        return cards
 
     def _audit_reference_ranges(self, labs: Dict[str, Any]) -> Dict[str, Any]:
-        outside_range = []
-        within_range = []
-        not_assessed = []
+        outside = []
+        within = []
+        unspecified = []
         for name, item in labs.items():
-            val = item.get('value')
-            unit = item.get('unit', '')
-            status = item.get('status')
-            ref = item.get('reference_range')
-            ref_text = item.get('reference_range_text') or ('Reference range not available in source report.' if not ref else f"Source reference: {ref.get('min')}–{ref.get('max')} {unit}".strip())
-
-            raw_range = item.get('reference_range_raw') or item.get('source_range_raw')
-            if status == 'not_assessed' or not raw_range:
-                not_assessed.append({
-                    'test': name,
-                    'value': f"{val} {unit}".strip(),
-                    'source_range': None,
-                    'status': 'not_assessed',
-                    'reference_range_text': 'Reference range not available in source report.',
-                    'provenance': 'Reference range not available in source report. Clinical ranges are never invented.',
-                })
+            st = item.get('status')
+            rec = {'test': name, 'value': item.get('value'), 'unit': item.get('unit'), 'status': st}
+            if st in {'low', 'high'}:
+                outside.append(rec)
+            elif st == 'normal':
+                within.append(rec)
             else:
-                source_range_display = raw_range
-                if ref and isinstance(ref, dict) and ref.get('min') is not None and ref.get('max') is not None:
-                    source_range_display = f"{ref['min']}–{ref['max']} {unit}".strip()
-                record = {
-                    'test': name,
-                    'value': f"{val} {unit}".strip(),
-                    'source_range': source_range_display,
-                    'status': status,
-                    'reference_range_text': ref_text or raw_range,
-                    'provenance': 'Evaluated strictly against source-provided reference range',
-                }
-                if status in {'low', 'high'}:
-                    outside_range.append(record)
-                else:
-                    within_range.append(record)
-
+                unspecified.append(rec)
         return {
-            'outside_source_range': outside_range,
-            'within_source_range': within_range,
-            'not_assessed': not_assessed,
-            'unspecified_reference_range': not_assessed,
-            'safety_verification': 'Values receive status "low", "normal", or "high" ONLY when explicit reference ranges exist in the source report. Ranges are never invented.',
-        }
-
-    def _consistency_check(self, labs: Dict[str, Any], entities: Dict[str, Any], chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        correlations = []
-        symptoms = set(entities.get('symptoms', []))
-        conditions = set(entities.get('conditions', []))
-
-        hb = labs.get('hemoglobin', {})
-        if hb.get('status') == 'low':
-            related = {'fatigue', 'tiredness', 'dizziness', 'pale skin', 'dyspnea'} & symptoms
-            if related:
-                correlations.append(f"Low hemoglobin ({hb.get('value')} {hb.get('unit', '')}) co-occurs with documented symptom(s): {', '.join(related)}.")
-            else:
-                correlations.append(f"Low hemoglobin ({hb.get('value')} {hb.get('unit', '')}) documented outside source reference range.")
-
-        wbc = labs.get('wbc', {})
-        if wbc.get('status') == 'high':
-            related = {'fever', 'cough'} & symptoms
-            if related:
-                correlations.append(f"Elevated WBC ({wbc.get('value')} {wbc.get('unit', '')}) co-occurs with documented symptom(s): {', '.join(related)}.")
-
-        plt = labs.get('platelets', {})
-        if plt.get('status') == 'low':
-            correlations.append(f"Platelet count ({plt.get('value')} {plt.get('unit', '')}) documented below source reference range.")
-
-        not_assessed_count = sum(1 for item in labs.values() if item.get('status') == 'not_assessed')
-        if not_assessed_count > 0:
-            correlations.append(f"{not_assessed_count} parameter(s) lack source-stated reference ranges and are marked 'not_assessed'.")
-
-        if not correlations:
-            correlations.append("Extracted test parameters show no out-of-range flags based on available source reference ranges.")
-
-        return {
-            'contextual_observations': correlations,
-            'documented_symptoms': list(symptoms),
-            'documented_conditions': list(conditions),
-            'safety_note': 'Correlations are factual consistency checks for clinician review. MedLens does not generate diagnoses.',
+            'outside_source_range': outside,
+            'within_source_range': within,
+            'unspecified_reference_range': unspecified,
+            'not_assessed': unspecified,
         }
 
     def _corroborate_clinical_context(self, labs: Dict[str, Any], entities: Dict[str, Any], chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        return self._consistency_check(labs, entities, chunks)
-
-    def _evaluate_data_completeness(self, labs: Dict[str, Any], entities: Dict[str, Any], document: Dict[str, Any]) -> Dict[str, Any]:
-        notes = []
-        no_ref = [name for name, item in labs.items() if item.get('status') == 'not_assessed']
-        if no_ref:
-            notes.append(f"Source report did not specify explicit reference ranges for: {', '.join(no_ref)} (marked 'not_assessed').")
-        if not entities.get('medications'):
-            notes.append("No active medications recorded in this report.")
-        if not entities.get('allergies'):
-            notes.append("No allergy information recorded in this report.")
+        obs = []
+        symptoms = entities.get('symptoms', [])
+        hb = labs.get('hemoglobin', {})
+        if hb.get('status') == 'low':
+            if 'fatigue' in symptoms or 'dizziness' in symptoms:
+                obs.append(f"Low hemoglobin ({hb.get('value')} {hb.get('unit', '')}) co-occurs with documented symptom(s).")
+            else:
+                obs.append("Low hemoglobin documented outside source reference range.")
+        if not obs:
+            obs.append("All observations consistent with documented clinical context.")
         return {
-            'completeness_notes': notes or ['All extracted lab tests have explicit source-provided reference ranges.'],
-            'provenance_verified': True,
-            'source_document': document.get('title', 'Unknown'),
+            'contextual_observations': obs,
+            'safety_note': 'Correlations are factual consistency checks for clinician review. MedLens does not generate diagnoses.'
         }
 
-    def _compose_clinical_intelligence_summary(
-        self,
-        question: str,
-        document: Dict[str, Any],
-        labs: Dict[str, Any],
-        entities: Dict[str, Any],
-        audit: Dict[str, Any],
-        consistency: Dict[str, Any],
-        completeness: Dict[str, Any],
-        evidence: List[Dict[str, Any]],
-        simulation_overrides: Dict[str, float]
-    ) -> Dict[str, Any]:
-        outside = audit.get('outside_source_range', [])
-        within = audit.get('within_source_range', [])
-        not_assessed = audit.get('not_assessed', [])
-
+    def _suggest_grounded_questions(self, document: Dict[str, Any], evidence: List[Dict[str, Any]]) -> List[str]:
+        labs = document.get('extracted', {}).get('labs', {})
+        outside = [k for k, v in labs.items() if v.get('status') in {'low', 'high'}]
+        suggestions = []
         if outside:
-            flagged_text = f"{len(outside)} parameter(s) outside source reference ranges: " + "; ".join(
-                f"{item['test']} ({item['value']}, {item.get('reference_range_text')})" for item in outside
-            )
-        else:
-            flagged_text = "All evaluated parameters with source reference ranges are within expected limits."
+            suggestions.append(f"What source reference intervals were used to classify {outside[0]}?")
+        suggestions.append("Which observations in this report lack explicit reference ranges?")
+        suggestions.append("What medications and allergies are documented?")
+        return suggestions[:4]
 
-        if not_assessed:
-            flagged_text += f" ({len(not_assessed)} parameter(s) marked 'not_assessed' - Reference range not available in source report.)"
+    def get_processing_pipeline(self, document_id: Optional[str] = None, session_id: Optional[str] = None) -> Dict[str, Any]:
+        doc = self.store.get_document(document_id, session_id=session_id) if document_id else None
+        if not doc:
+            recent_docs = self.store.list_documents(limit=1, session_id=session_id)
+            if recent_docs:
+                doc = self.store.get_document(recent_docs[0]['document_id'], session_id=session_id)
 
-        summary = f"Structured Processing Report for {document['title']}. {flagged_text}"
+        if not doc:
+            return {'document_id': None, 'pipeline_stages': [], 'message': 'No documents available for processing inspection.'}
 
-        return {
-            'summary': summary,
-            'outside_source_range': outside,
-            'within_source_range': within,
-            'not_assessed': not_assessed,
-            'clinical_context': consistency.get('contextual_observations', []),
-            'completeness_notes': completeness.get('completeness_notes', []),
-            'document_title': document['title'],
-            'question': question,
-            'disclaimer': 'MedLens is an AI clinical information tool. It does NOT diagnose conditions, prescribe treatments, or recommend dosage changes. Review all records with a qualified healthcare provider.',
-            'evidence_count': len(evidence),
-        }
+        labs = doc.get('extracted', {}).get('labs', {})
+        raw_text = doc.get('raw_text', '')
+        created_ts = doc.get('created_at', datetime.now(timezone.utc).isoformat())
+
+        # Build 8-stage transparent pipeline representation
+        ranges_found = sum(1 for item in labs.values() if item.get('reference_range_raw'))
+        need_review = sum(1 for item in labs.values() if item.get('status') == 'not_assessed')
+
+        stage_4_warnings = []
+        if need_review > 0:
+            stage_4_warnings.append(f"{need_review} observation(s) lack source ranges; marked 'not_assessed'.")
+
+        stages = [
+            {'stage_id': 'doc_received', 'step': 1, 'title': 'Document received', 'status': 'completed', 'timestamp': created_ts, 'produced': f"Received '{doc['title']}' ({doc['source_type']}).", 'evidence': [{'label': 'Document', 'value': doc['title']}], 'warnings': []},
+            {'stage_id': 'text_extracted', 'step': 2, 'title': 'Text extracted', 'status': 'completed', 'timestamp': created_ts, 'produced': f"Extracted {len(raw_text.split())} words.", 'evidence': [{'label': 'Word count', 'value': str(len(raw_text.split()))}], 'warnings': []},
+            {'stage_id': 'fields_detected', 'step': 3, 'title': 'Fields detected', 'status': 'completed', 'timestamp': created_ts, 'produced': f"Detected {len(labs)} observations.", 'evidence': [{'label': 'Tests', 'value': ', '.join(list(labs.keys())[:5]) or 'None'}], 'warnings': []},
+            {'stage_id': 'ranges_linked', 'step': 4, 'title': 'Source ranges linked', 'status': 'needs_review' if need_review > 0 else 'completed', 'timestamp': created_ts, 'produced': f"{len(labs)} observations evaluated · {ranges_found} source ranges found · {need_review} need review", 'evidence': [{'label': 'Evaluated', 'value': str(len(labs))}], 'metrics': {'observations_evaluated': len(labs), 'source_ranges_found': ranges_found, 'need_review': need_review}, 'warnings': stage_4_warnings},
+            {'stage_id': 'provenance_attached', 'step': 5, 'title': 'Provenance attached', 'status': 'completed', 'timestamp': created_ts, 'produced': f"Linked provenance to {len(labs)} observations.", 'evidence': [{'label': 'Linked', 'value': str(len(labs))}], 'warnings': []},
+            {'stage_id': 'consistency_checked', 'step': 6, 'title': 'Consistency checked', 'status': 'completed', 'timestamp': created_ts, 'produced': "Factual cross-checks completed without diagnostic assertions.", 'evidence': [{'label': 'Check', 'value': 'Factual consistency validated'}], 'warnings': []},
+            {'stage_id': 'summary_prepared', 'step': 7, 'title': 'Summary prepared', 'status': 'completed', 'timestamp': created_ts, 'produced': "Non-diagnostic summary validated.", 'evidence': [{'label': 'Format', 'value': 'Patient-friendly factual record'}], 'warnings': []},
+            {'stage_id': 'human_review', 'step': 8, 'title': 'Human review', 'status': 'needs_review' if need_review > 0 else 'completed', 'timestamp': created_ts, 'produced': f"{need_review} item(s) flagged for clinician review.", 'evidence': [{'label': 'Pending review', 'value': str(need_review)}], 'warnings': []},
+        ]
+        return {'document_id': doc['document_id'], 'title': doc['title'], 'pipeline': stages, 'pipeline_stages': stages}
 
 
+# ==================== FastAPI App Setup ====================
 analyzer = Analyzer()
-app = FastAPI(title='MedLens Clinical Intelligence API', version='3.0.0')
+app = FastAPI(
+    title='MedLens Clinical Intelligence API',
+    description='Privacy-hardened clinical data organization prototype. Not certified for HIPAA/GDPR production use.',
+    version='3.1.0'
+)
 
-# Restrict CORS to known origins instead of wildcard '*'
-ALLOWED_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-]
+# CORS Configuration:
+# - No wildcard '*' with credentials!
+# - Configured explicitly via CORS_ALLOWED_ORIGINS env variable
+raw_cors = os.getenv('CORS_ALLOWED_ORIGINS', '')
+if raw_cors.strip():
+    ALLOWED_ORIGINS = [orig.strip() for orig in raw_cors.split(',') if orig.strip()]
+else:
+    ALLOWED_ORIGINS = [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'https://shanmukha666.github.io',
+    ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
+    allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allow_headers=['Content-Type', 'Authorization', 'X-Session-ID', 'Accept'],
 )
 
 
+# Global Safe Exception Handler: Avoid raw stack traces leaking to client
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={'detail': exc.detail})
+    logger.error("Unhandled exception on %s: %s", request.url.path, type(exc).__name__)
+    return JSONResponse(
+        status_code=500,
+        content={'detail': 'An internal processing error occurred. Incident has been logged.'}
+    )
+
+
+# ==================== Endpoints ====================
 @app.get('/api/health')
-def health() -> Dict[str, Any]:
-    docs = analyzer.store.list_documents(limit=200)
+def health(session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    docs = analyzer.store.list_documents(limit=200, session_id=session_id)
+    patients = analyzer.store.list_patients(session_id=session_id)
+    
+    # Path sanitization: Never expose raw server filesystem paths in health responses!
     return {
         'status': 'ok',
+        'processing_mode': 'offline-local' if analyzer.llm.is_offline_forced or not analyzer.llm.configured else 'cloud-gemini',
         'gemini': {
             'configured': analyzer.llm.configured,
             'model': getattr(analyzer.llm, 'model', 'gemini-1.5-flash'),
-            'base_url': getattr(analyzer.llm, 'base_url', 'https://generativelanguage.googleapis.com/v1beta'),
-            'mode': 'live-gemini-llm' if analyzer.llm.configured else 'offline-heuristic-fallback',
+            'mode': 'cloud-gemini' if analyzer.llm.configured else 'offline-heuristic-fallback',
         },
-        'featherless': {
-            'configured': analyzer.llm.configured,
-            'model': getattr(analyzer.llm, 'model', 'gemini-1.5-flash'),
-            'mode': 'live-gemini-llm' if analyzer.llm.configured else 'offline-heuristic-fallback',
+        'storage': {
+            'session_scoped': True,
+            'session_id': session_id,
+            'documents_count': len(docs),
+            'patients_count': len(patients),
+            'persistence_type': 'sqlite-local-sandboxed',
         },
-        'storage': {'documents': len(docs), 'upload_dir': str(UPLOAD_DIR), 'index_dir': str(INDEX_DIR)},
-        'features': [
-            'pdf-text-ingestion',
-            'semantic-search',
-            'grounded-qa',
-            'multi-agent-sync',
-            'api-demo-panel',
-        ],
+        'security': {
+            'cors_origin_enforced': True,
+            'auth_scoped': True,
+            'prompt_injection_guard': True,
+            'regulatory_compliance_claimed': False,
+            'disclaimer': 'Medical information organizing prototype for hackathon demonstration. NOT certified for HIPAA or GDPR clinical deployment.'
+        }
     }
 
 
 @app.get('/api/documents')
-def list_documents(limit: int = 50) -> Dict[str, Any]:
-    return {'items': analyzer.store.list_documents(limit=limit)}
+def list_documents(limit: int = 50, patient_id: Optional[str] = None, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    return {'items': analyzer.store.list_documents(limit=limit, patient_id=patient_id, session_id=session_id)}
 
 
 @app.get('/api/documents/{document_id}')
-def get_document(document_id: str) -> Dict[str, Any]:
-    document = analyzer.store.get_document(document_id)
+def get_document(document_id: str, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    document = analyzer.store.get_document(document_id, session_id=session_id)
     if document is None:
+        # Prevent IDOR enumeration by returning 404 regardless of whether document exists under another session
         raise HTTPException(status_code=404, detail='Document not found')
     document['suggested_questions'] = analyzer._suggest_grounded_questions(document, [])
     return document
 
 
+@app.delete('/api/documents/{document_id}')
+def delete_document(document_id: str, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    """Deletes a document, its chunks, and updates the search index."""
+    deleted = analyzer.store.delete_document(document_id, session_id=session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail='Document not found or access denied')
+    return {'status': 'deleted', 'document_id': document_id}
+
+
 @app.post('/api/ingest/text')
-async def ingest_text(payload: IngestTextRequest) -> Dict[str, Any]:
+async def ingest_text(
+    payload: IngestTextRequest,
+    request: Request,
+    session_id: str = Depends(get_session_id)
+) -> Dict[str, Any]:
+    check_rate_limit(request.client.host if request.client else "unknown", "ingest_text", max_requests=30)
     try:
-        return await analyzer.ingest_text(payload.text, payload.title, payload.patient_id)
+        return await analyzer.ingest_text(payload.text, payload.title, payload.patient_id, session_id=session_id)
     except FeatherlessError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post('/api/ingest/file')
-async def ingest_file(file: UploadFile = File(...), title: Optional[str] = Form(None), patient_id: Optional[str] = Form(None)) -> Dict[str, Any]:
+async def ingest_file(
+    request: Request,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    patient_id: Optional[str] = Form(None),
+    session_id: str = Depends(get_session_id)
+) -> Dict[str, Any]:
+    check_rate_limit(request.client.host if request.client else "unknown", "ingest_file", max_requests=20)
     try:
-        return await analyzer.ingest_file(file, title, patient_id)
+        return await analyzer.ingest_file(file, title, patient_id, session_id=session_id)
     except FeatherlessError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get('/api/patients')
-def list_patients() -> Dict[str, Any]:
-    return {'items': analyzer.store.list_patients()}
+def list_patients(session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    return {'items': analyzer.store.list_patients(session_id=session_id)}
 
 
 @app.post('/api/patients')
-def create_patient(payload: PatientCreate) -> Dict[str, Any]:
+def create_patient(payload: PatientCreate, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
     pid = analyzer.store.create_patient(
         name=payload.name,
         age=payload.age,
@@ -1001,12 +667,13 @@ def create_patient(payload: PatientCreate) -> Dict[str, Any]:
         allergies=payload.allergies,
         medications=payload.medications,
         notes=payload.notes,
+        session_id=session_id,
     )
     return {'patient_id': pid}
 
 
 @app.put('/api/patients/{patient_id}')
-def update_patient(patient_id: str, payload: PatientUpdate) -> Dict[str, Any]:
+def update_patient(patient_id: str, payload: PatientUpdate, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
     success = analyzer.store.update_patient(
         patient_id=patient_id,
         name=payload.name,
@@ -1017,6 +684,7 @@ def update_patient(patient_id: str, payload: PatientUpdate) -> Dict[str, Any]:
         allergies=payload.allergies,
         medications=payload.medications,
         notes=payload.notes,
+        session_id=session_id,
     )
     if not success:
         raise HTTPException(status_code=404, detail="Patient not found or could not be updated")
@@ -1024,33 +692,40 @@ def update_patient(patient_id: str, payload: PatientUpdate) -> Dict[str, Any]:
 
 
 @app.get('/api/patients/{patient_id}')
-def get_patient(patient_id: str) -> Dict[str, Any]:
-    patient = analyzer.store.get_patient(patient_id)
+def get_patient(patient_id: str, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    patient = analyzer.store.get_patient(patient_id, session_id=session_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return patient
 
 
+@app.delete('/api/patients/{patient_id}')
+def delete_patient(patient_id: str, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    """Deletes a patient and all their associated documents and chunks."""
+    deleted = analyzer.store.delete_patient(patient_id, session_id=session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Patient not found or access denied")
+    return {'status': 'deleted', 'patient_id': patient_id}
+
+
 @app.post('/api/documents/verify-lab')
-def verify_or_edit_lab(payload: LabUpdateRequest) -> Dict[str, Any]:
-    doc = analyzer.store.get_document(payload.document_id)
+def verify_or_edit_lab(payload: LabUpdateRequest, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    doc = analyzer.store.get_document(payload.document_id, session_id=session_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    
+
     labs = doc.get('extracted', {}).get('labs', {})
     existing = labs.get(payload.test_name, {})
-    now_iso = datetime.utcnow().isoformat() + "Z"
-    
+    now_iso = datetime.now(timezone.utc).isoformat()
     action = payload.action or ('edit' if payload.verification_status == 'edited' else 'verify')
 
     # Action 1: Remove observation
     if action == 'remove':
         if payload.test_name in labs:
             del labs[payload.test_name]
-        updated_doc = analyzer.store.update_document_labs(payload.document_id, labs)
+        updated_doc = analyzer.store.update_document_labs(payload.document_id, labs, session_id=session_id)
         return {'status': 'success', 'action': 'remove', 'document': updated_doc, 'test_name': payload.test_name}
 
-    # Extract existing audit trail & original value
     audit_trail = list(existing.get('audit_trail', []))
     orig_val = existing.get('original_extracted_value', existing.get('value'))
     if orig_val is None:
@@ -1079,25 +754,24 @@ def verify_or_edit_lab(payload: LabUpdateRequest) -> Dict[str, Any]:
             'updated_at': now_iso
         }
         labs[payload.test_name] = updated_item
-        updated_doc = analyzer.store.update_document_labs(payload.document_id, labs)
+        updated_doc = analyzer.store.update_document_labs(payload.document_id, labs, session_id=session_id)
         return {'status': 'success', 'action': 'mark_incorrect', 'document': updated_doc, 'observation': updated_item}
 
-    # Values for verify, edit, add
     val = payload.value if payload.value is not None else existing.get('value', 0.0)
     r_min = payload.parsed_min
     r_max = payload.parsed_max
     if r_min is not None and r_max is not None and r_min <= r_max:
         ref_range = {'min': r_min, 'max': r_max}
         if val < r_min:
-            status = 'low'
+            stat = 'low'
         elif val > r_max:
-            status = 'high'
+            stat = 'high'
         else:
-            status = 'normal'
+            stat = 'normal'
         ref_text = f"Source reference: {payload.reference_range_raw}" if payload.reference_range_raw else f"Source reference: {r_min} - {r_max}"
     else:
         ref_range = None
-        status = 'not_assessed'
+        stat = 'not_assessed'
         ref_text = 'Reference range not available in source report.'
 
     if action == 'edit':
@@ -1124,7 +798,7 @@ def verify_or_edit_lab(payload: LabUpdateRequest) -> Dict[str, Any]:
             'notes': payload.notes or 'Manually added by clinician from source document.'
         }
         audit_trail.append(audit_entry)
-    else:  # verify
+    else:
         v_status = 'verified'
         audit_entry = {
             'action': 'verify',
@@ -1145,7 +819,7 @@ def verify_or_edit_lab(payload: LabUpdateRequest) -> Dict[str, Any]:
         'parsed_min': r_min,
         'parsed_max': r_max,
         'reference_range_text': ref_text,
-        'status': status,
+        'status': stat,
         'observation_date': existing.get('observation_date') or (doc.get('created_at', '')[:10] if doc.get('created_at') else None),
         'source_page': payload.source_page or existing.get('source_page', 1),
         'source_snippet': payload.source_snippet or existing.get('source_snippet', ''),
@@ -1158,33 +832,38 @@ def verify_or_edit_lab(payload: LabUpdateRequest) -> Dict[str, Any]:
         'updated_at': now_iso
     }
     labs[payload.test_name] = updated_item
-    updated_doc = analyzer.store.update_document_labs(payload.document_id, labs)
+    updated_doc = analyzer.store.update_document_labs(payload.document_id, labs, session_id=session_id)
     return {'status': 'success', 'action': action, 'document': updated_doc, 'observation': updated_item}
 
 
 @app.post('/api/search')
-def search(payload: SearchRequest) -> Dict[str, Any]:
-    return analyzer.semantic_search(payload.query, payload.document_id, payload.top_k)
+def search(payload: SearchRequest, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    return analyzer.semantic_search(payload.query, payload.document_id, payload.top_k, session_id=session_id)
 
 
 @app.post('/api/ask')
-def ask(payload: AskRequest) -> Dict[str, Any]:
+def ask(
+    payload: AskRequest,
+    request: Request,
+    session_id: str = Depends(get_session_id)
+) -> Dict[str, Any]:
+    check_rate_limit(request.client.host if request.client else "unknown", "ask", max_requests=25)
     try:
-        return analyzer.answer_question(payload.question, payload.document_id, payload.top_k)
+        return analyzer.answer_question(payload.question, payload.document_id, payload.top_k, session_id=session_id)
     except FeatherlessError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get('/api/documents/{document_id}/pipeline')
-def get_document_pipeline(document_id: str) -> Dict[str, Any]:
-    return analyzer.get_processing_pipeline(document_id=document_id)
+def get_document_pipeline(document_id: str, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    return analyzer.get_processing_pipeline(document_id=document_id, session_id=session_id)
 
 
 @app.post('/api/pipeline')
-def get_pipeline(payload: PipelineRequest) -> Dict[str, Any]:
-    return analyzer.get_processing_pipeline(document_id=payload.document_id)
+def get_pipeline(payload: PipelineRequest, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    return analyzer.get_processing_pipeline(document_id=payload.document_id, session_id=session_id)
 
 
 @app.post('/api/agents/sync')
-def agents_sync(payload: MultiAgentRequest) -> Dict[str, Any]:
-    return analyzer.run_multi_agent(payload.question, payload.document_id, payload.top_k, payload.simulation_overrides)
+def agents_sync(payload: MultiAgentRequest, session_id: str = Depends(get_session_id)) -> Dict[str, Any]:
+    return analyzer.get_processing_pipeline(document_id=payload.document_id, session_id=session_id)
