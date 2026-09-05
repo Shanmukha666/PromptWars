@@ -1,0 +1,34 @@
+# Environments
+.env
+.env.local
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.class
+*.so
+
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Database & Uploads
+*.db
+*.sqlite
+*.sqlite3
+data/uploads/*
+!data/uploads/.gitkeep
+data/indexes/*
+!data/indexes/.gitkeep
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

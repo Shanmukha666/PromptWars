@@ -1,0 +1,344 @@
+import React, { useEffect, useState } from 'react'
+import Sidebar from './components/Sidebar'
+import TopBar from './components/TopBar'
+import Breadcrumbs from './components/Breadcrumbs'
+import HelpModal from './components/HelpModal'
+import SettingsModal from './components/SettingsModal'
+import OverviewPage from './components/OverviewPage'
+import PatientProfilePage from './components/PatientProfilePage'
+import ReportsPage from './components/ReportsPage'
+import StructuredRecordPage from './components/StructuredRecordPage'
+import ReviewVerificationPage from './components/ReviewVerificationPage'
+import TimelineHistoryPage from './components/TimelineHistoryPage'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+
+async function request(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, options)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `Request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export default function App() {
+  // 6-stage clinical workflow state: overview | profile | reports | structured | review | timeline
+  const [stage, setStage] = useState('overview')
+  const [health, setHealth] = useState(null)
+  const [documents, setDocuments] = useState([])
+  const [patients, setPatients] = useState([])
+  const [activePatient, setActivePatient] = useState(null)
+  const [activeDocument, setActiveDocument] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Modals & Mobile Shell State
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    refreshAll()
+  }, [])
+
+  async function refreshAll() {
+    try {
+      const [healthData, docsData, patientsData] = await Promise.all([
+        request('/api/health'),
+        request('/api/documents'),
+        request('/api/patients')
+      ])
+      setHealth(healthData)
+      setDocuments(docsData.items || [])
+      setPatients(patientsData.items || [])
+      if (activePatient?.patient_id) {
+        await openPatient(activePatient.patient_id, false)
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function openPatient(patientId, navigateToProfile = true) {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await request(`/api/patients/${patientId}`)
+      setActivePatient(data)
+      if (data.documents && data.documents.length > 0) {
+        await openDocument(data.documents[0].document_id)
+      } else {
+        setActiveDocument(null)
+      }
+      if (navigateToProfile) {
+        setStage('profile')
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function openDocument(documentId) {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await request(`/api/documents/${documentId}`)
+      setActiveDocument(data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSavePatient(payload) {
+    setLoading(true)
+    setError('')
+    try {
+      if (activePatient?.patient_id) {
+        await request(`/api/patients/${activePatient.patient_id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        await openPatient(activePatient.patient_id, false)
+      } else {
+        const res = await request('/api/patients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        await refreshAll()
+        await openPatient(res.patient_id, true)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleUploadFile(file, title) {
+    if (!file) return
+    setLoading(true)
+    setError('')
+    try {
+      const body = new FormData()
+      body.append('file', file)
+      if (title.trim()) body.append('title', title.trim())
+      if (activePatient?.patient_id) body.append('patient_id', activePatient.patient_id)
+      const data = await request('/api/ingest/file', { method: 'POST', body })
+      await refreshAll()
+      await openDocument(data.document_id)
+      setStage('structured')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleUploadText(text, title) {
+    if (!text.trim()) return
+    setLoading(true)
+    setError('')
+    try {
+      const data = await request('/api/ingest/text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim() || 'Clinical Report Text',
+          text,
+          patient_id: activePatient?.patient_id || null
+        })
+      })
+      await refreshAll()
+      await openDocument(data.document_id)
+      setStage('structured')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleVerifyOrEditLab(verificationPayload) {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await request('/api/documents/verify-lab', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(verificationPayload)
+      })
+      if (res.document) {
+        setActiveDocument(res.document)
+      }
+      if (activePatient?.patient_id) {
+        await openPatient(activePatient.patient_id, false)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function renderCurrentStage() {
+    switch (stage) {
+      case 'overview':
+        return (
+          <OverviewPage
+            patients={patients}
+            activePatient={activePatient}
+            onSelectPatient={(id) => openPatient(id, false)}
+            onNewPatient={() => {
+              setActivePatient(null)
+              setActiveDocument(null)
+              setStage('profile')
+            }}
+            documents={documents}
+            health={health}
+            onProceedToProfile={() => setStage('profile')}
+            onSelectDocument={async (docId) => {
+              await openDocument(docId)
+              setStage('structured')
+            }}
+            onNavigateStage={(targetStage) => setStage(targetStage)}
+          />
+        )
+      case 'profile':
+        return (
+          <PatientProfilePage
+            activePatient={activePatient}
+            onSavePatient={handleSavePatient}
+            onProceedToReports={() => setStage('reports')}
+            loading={loading}
+          />
+        )
+      case 'reports':
+        return (
+          <ReportsPage
+            activePatient={activePatient}
+            activeDocument={activeDocument}
+            onUploadFile={handleUploadFile}
+            onUploadText={handleUploadText}
+            onSelectDocument={openDocument}
+            onProceedToStructured={() => setStage('structured')}
+            loading={loading}
+          />
+        )
+      case 'structured':
+        return (
+          <StructuredRecordPage
+            activePatient={activePatient}
+            activeDocument={activeDocument}
+            onSelectDocument={openDocument}
+            onProceedToReview={() => setStage('review')}
+            onProceedToTimeline={() => setStage('timeline')}
+            onNavigateStage={(targetStage) => setStage(targetStage)}
+          />
+        )
+      case 'review':
+        return (
+          <ReviewVerificationPage
+            activePatient={activePatient}
+            activeDocument={activeDocument}
+            onSelectDocument={openDocument}
+            onVerifyOrEditLab={handleVerifyOrEditLab}
+            onProceedToTimeline={() => setStage('timeline')}
+            onNavigateStage={(targetStage) => setStage(targetStage)}
+            loading={loading}
+          />
+        )
+      case 'timeline':
+        return (
+          <TimelineHistoryPage
+            activePatient={activePatient}
+            onSelectDocument={(id) => {
+              openDocument(id)
+              setStage('structured')
+            }}
+          />
+        )
+      default:
+        return null
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      {/* 240px Left Navigation Sidebar */}
+      <Sidebar
+        currentStage={stage}
+        onSelectStage={(newStage) => setStage(newStage)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        isOpenMobile={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        reportsCount={activePatient?.documents?.length || documents.length}
+      />
+
+      {/* Main App Container */}
+      <div className="main-wrapper">
+        {/* Top Header Bar */}
+        <TopBar
+          patients={patients}
+          activePatient={activePatient}
+          onSelectPatient={(id) => openPatient(id, false)}
+          onNewPatient={() => {
+            setActivePatient(null)
+            setActiveDocument(null)
+            setStage('profile')
+          }}
+          onOpenHelp={() => setIsHelpOpen(true)}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+        />
+
+        {/* Scrollable Main Content Region */}
+        <main className="main-content">
+          {/* Contextual Breadcrumbs */}
+          <Breadcrumbs
+            stage={stage}
+            activePatient={activePatient}
+            activeDocument={activeDocument}
+            onNavigate={(newStage) => setStage(newStage)}
+          />
+
+          {/* System Error Notification */}
+          {error && (
+            <div className="error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{error}</span>
+              <button
+                className="secondary-btn btn-sm"
+                onClick={() => setError('')}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Active Workflow Page */}
+          {renderCurrentStage()}
+        </main>
+      </div>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        health={health}
+        documentsCount={documents.length}
+        patientsCount={patients.length}
+      />
+
+      {/* Clinical Help & Principles Modal */}
+      <HelpModal
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+      />
+    </div>
+  )
+}
