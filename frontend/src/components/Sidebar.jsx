@@ -36,73 +36,81 @@ export default function Sidebar({
         <div
           className="sidebar-mobile-overlay"
           onClick={onCloseMobile}
-          aria-label="Close navigation sidebar"
+          aria-label="Close navigation sidebar overlay"
+          role="presentation"
         />
       )}
 
-      <aside className={`sidebar ${isOpenMobile ? 'mobile-open' : ''}`}>
+      <aside
+        className={`sidebar ${isOpenMobile ? 'mobile-open' : ''}`}
+        aria-label="Main Navigation Sidebar"
+      >
         {/* Brand Header */}
         <div className="sidebar-brand-wrap">
           <div className="sidebar-brand">
-            <div className="brand-mark">ML</div>
+            <div className="brand-mark" aria-hidden="true">ML</div>
             <div className="brand-text">
               <span className="brand-name">MedLens</span>
               <span className="brand-sub">Clinical Intelligence</span>
             </div>
           </div>
           {isOpenMobile && (
-            <button className="sidebar-close-mobile-btn" onClick={onCloseMobile}>
-              <IconClose size={18} />
+            <button
+              type="button"
+              className="sidebar-close-mobile-btn"
+              onClick={onCloseMobile}
+              aria-label="Close navigation sidebar"
+            >
+              <IconClose size={18} aria-hidden="true" />
             </button>
           )}
         </div>
 
         {/* Primary Navigation Items */}
-        <nav className="sidebar-nav" aria-label="Main Navigation">
-          <div className="sidebar-section-title">Workflow</div>
-          <ul className="sidebar-nav-list">
+        <nav className="sidebar-nav" aria-label="Workflow Stages">
+          <div className="sidebar-section-title" id="sidebar-workflow-heading">Workflow</div>
+          <div className="sidebar-items" role="list" aria-labelledby="sidebar-workflow-heading">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon
               const isActive = currentStage === item.key
+
               return (
-                <li key={item.key}>
-                  <button
-                    type="button"
-                    className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
-                    onClick={() => {
-                      onSelectStage(item.key)
-                      if (onCloseMobile) onCloseMobile()
-                    }}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    <span className="sidebar-nav-icon">
-                      <Icon size={18} />
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`sidebar-nav-btn ${isActive ? 'active' : ''}`}
+                  onClick={() => {
+                    onSelectStage(item.key)
+                    if (isOpenMobile) onCloseMobile()
+                  }}
+                  aria-current={isActive ? 'page' : undefined}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span className="sidebar-btn-label">{item.label}</span>
+                  {item.key === 'reports' && reportsCount > 0 && (
+                    <span
+                      className="sidebar-badge"
+                      aria-label={`${reportsCount} reports available`}
+                    >
+                      {reportsCount}
                     </span>
-                    <span className="sidebar-nav-label">{item.label}</span>
-                    {item.key === 'reports' && reportsCount > 0 && (
-                      <span className="sidebar-nav-count">{reportsCount}</span>
-                    )}
-                  </button>
-                </li>
+                  )}
+                </button>
               )
             })}
-          </ul>
+          </div>
         </nav>
 
-        {/* Bottom actions / Settings */}
+        {/* Bottom Settings Link */}
         <div className="sidebar-footer">
           <button
             type="button"
             className="sidebar-footer-btn"
-            onClick={() => {
-              onOpenSettings()
-              if (onCloseMobile) onCloseMobile()
-            }}
+            onClick={onOpenSettings}
+            aria-label="Open System Settings & Telemetry dialog"
           >
-            <span className="sidebar-nav-icon">
-              <IconSettings size={18} />
-            </span>
-            <span className="sidebar-nav-label">Settings</span>
+            <IconSettings size={18} aria-hidden="true" />
+            <span>Settings & Telemetry</span>
           </button>
         </div>
       </aside>

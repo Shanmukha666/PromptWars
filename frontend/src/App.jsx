@@ -359,6 +359,10 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {/* WCAG 2.4.1 Skip Link */}
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       {/* 240px Left Navigation Sidebar */}
       <Sidebar
         currentStage={stage}
@@ -386,7 +390,16 @@ export default function App() {
         />
 
         {/* Scrollable Main Content Region */}
-        <main className="main-content">
+        <main id="main-content" tabIndex="-1" role="main" className="main-content">
+          {/* WCAG 4.1.3 Screen Reader Live Announcement Region */}
+          <div
+            id="a11y-live-region"
+            className="sr-only"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {error ? `Alert: ${error}` : (loading ? 'Loading clinical data...' : `Current workflow stage: ${stage}`)}
+          </div>
           {/* Contextual Breadcrumbs */}
           <Breadcrumbs
             stage={stage}
@@ -397,7 +410,7 @@ export default function App() {
 
           {/* System Error Notification */}
           {error && (
-            <div className="error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="error" role="alert" aria-live="assertive" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>{error}</span>
               <button
                 className="secondary-btn btn-sm"

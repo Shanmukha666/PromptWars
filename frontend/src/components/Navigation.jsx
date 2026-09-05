@@ -12,25 +12,29 @@ export const WORKFLOW_STAGES = [
 
 export default function Navigation({ currentStage, onSelectStage, activePatient, activeDocument }) {
   return (
-    <nav className="workflow-nav" aria-label="Clinical Workflow Navigation">
-      <div className="workflow-steps">
+    <nav className="workflow-nav" aria-label="Clinical Workflow Steps">
+      <div className="workflow-steps" role="list">
         {WORKFLOW_STAGES.map((item, idx) => {
           const isActive = currentStage === item.key
-          const isEnabled = item.key === 'overview' || activePatient || (item.key === 'profile')
           
           return (
             <button
               key={item.key}
+              type="button"
               className={`workflow-step-btn ${isActive ? 'active' : ''}`}
               onClick={() => onSelectStage(item.key)}
               title={item.desc}
+              aria-current={isActive ? 'step' : undefined}
+              aria-label={`Step ${item.step}: ${item.label} - ${item.desc}`}
             >
-              <div className="step-num">{item.step}</div>
+              <div className="step-num" aria-hidden="true">{item.step}</div>
               <div className="step-info">
                 <div className="step-label">{item.label}</div>
                 <div className="step-desc">{item.desc}</div>
               </div>
-              {idx < WORKFLOW_STAGES.length - 1 && <div className="step-arrow">→</div>}
+              {idx < WORKFLOW_STAGES.length - 1 && (
+                <div className="step-arrow" aria-hidden="true">→</div>
+              )}
             </button>
           )
         })}

@@ -8,25 +8,29 @@ export default function TopBar({
   onSelectPatient,
   onNewPatient,
   onOpenHelp,
-  onToggleMobileSidebar
+  onToggleMobileSidebar,
+  isOpenMobile = false
 }) {
   return (
-    <header className="top-bar">
+    <header className="top-bar" role="banner">
       <div className="top-bar-left">
         <button
           className="mobile-menu-btn"
           onClick={onToggleMobileSidebar}
           aria-label="Open Navigation Menu"
+          aria-expanded={isOpenMobile}
         >
-          <IconMenu size={20} />
+          <IconMenu size={20} aria-hidden="true" />
         </button>
 
         {/* Patient Selector */}
         <div className="patient-selector-wrap">
-          <label htmlFor="patient-select" className="top-bar-label">Patient</label>
+          <label htmlFor="header-patient-select" className="top-bar-label">
+            Patient:
+          </label>
           <div className="patient-select-controls">
             <select
-              id="patient-select"
+              id="header-patient-select"
               value={activePatient?.patient_id || ''}
               onChange={(e) => {
                 if (e.target.value === '__new__') {
@@ -36,6 +40,7 @@ export default function TopBar({
                 }
               }}
               className="patient-select"
+              aria-label="Select active patient record"
             >
               <option value="" disabled>Select patient...</option>
               {patients.map(p => (
@@ -46,9 +51,11 @@ export default function TopBar({
               <option value="__new__">+ New Patient Intake...</option>
             </select>
             <button
+              type="button"
               onClick={onNewPatient}
               className="secondary-btn btn-sm"
               title="Intake New Patient"
+              aria-label="Intake New Patient Profile"
             >
               + New
             </button>
@@ -57,10 +64,10 @@ export default function TopBar({
 
         {/* Demographic Context Pill */}
         {activePatient ? (
-          <div className="demographic-context-pill">
+          <div className="demographic-context-pill" aria-label={`Patient demographic details: ${activePatient.name}`}>
             <div className="demo-item">
               <span className="demo-label">Age/Sex:</span>
-              <span className="demo-val">{activePatient.age || '—'} / {activePatient.sex || '—'}</span>
+              <span className="demo-val">{activePatient.age || 'â€”'} / {activePatient.sex || 'â€”'}</span>
             </div>
             {activePatient.conditions?.length > 0 && (
               <div className="demo-item hide-mobile">
@@ -87,19 +94,25 @@ export default function TopBar({
 
       <div className="top-bar-right">
         {/* Privacy & Guardrail status */}
-        <div className="privacy-badge" title="MedLens processes clinical records locally with strict provenance attribution and no diagnostic overreach.">
-          <IconShield size={15} />
+        <div
+          className="privacy-badge"
+          title="MedLens processes clinical records locally with strict provenance attribution and no diagnostic overreach."
+          role="status"
+          aria-label="Status: Private and Provenance Grounded"
+        >
+          <IconShield size={15} aria-hidden="true" />
           <span className="privacy-text">Private & Provenance-Grounded</span>
         </div>
 
         {/* Help Action */}
         <button
+          type="button"
           className="help-btn"
           onClick={onOpenHelp}
           title="Clinical Safety & Workflow Help"
-          aria-label="Help and Clinical Safety Principles"
+          aria-label="Open clinical safety guidance and help documentation"
         >
-          <IconHelp size={16} />
+          <IconHelp size={16} aria-hidden="true" />
           <span className="hide-mobile">Help</span>
         </button>
       </div>

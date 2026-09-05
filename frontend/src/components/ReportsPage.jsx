@@ -162,7 +162,16 @@ export default function ReportsPage({
   const isBusy = Boolean(processingState && processingState !== 'Complete' && processingState !== 'Failed') || externalLoading
 
   return (
-    <div className="page-grid two-col" style={{ alignItems: 'start' }}>
+    <div className="page-grid two-col" style={{ alignItems: 'start' }} id="reports-page-root">
+      {/* WCAG 4.1.3 Live Region for Report Upload Status */}
+      <div
+        id="report-upload-status"
+        className="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {loading ? 'Processing clinical document...' : (activeDocument ? `Active report: ${activeDocument.title}` : 'No document selected')}
+      </div>
       {/* Upload Card */}
       <div className="card" style={{ padding: '1.5rem' }}>
         <div className="section-head" style={{ marginBottom: '1rem' }}>
@@ -240,13 +249,30 @@ export default function ReportsPage({
               onClick={() => fileInputRef.current?.click()}
             >
               <input
+                id="report-file-input"
                 ref={fileInputRef}
                 type="file"
                 multiple
                 accept=".pdf,.docx,.txt,.json,.html,.htm,.xml"
                 onChange={handleFileChange}
-                style={{ display: 'none' }}
+                className="sr-only"
+                aria-label="Upload clinical report files"
               />
+              <label
+                htmlFor="report-file-input"
+                className="primary-btn"
+                tabIndex={0}
+                role="button"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    if (fileInputRef.current) fileInputRef.current.click()
+                  }
+                }}
+                style={{ display: 'inline-flex', cursor: 'pointer', margin: '0.5rem auto' }}
+              >
+                Browse Files
+              </label>
               <div style={{ display: 'inline-flex', padding: '0.75rem', borderRadius: '50%', background: 'var(--bg-surface)', color: 'var(--brand-primary)', marginBottom: '0.75rem' }}>
                 <IconUploadCloud size={30} />
               </div>

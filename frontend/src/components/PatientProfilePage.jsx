@@ -298,7 +298,7 @@ export default function PatientProfilePage({
                   Patient Identifier or Full Name <span style={{ color: 'var(--status-danger)' }}>*</span>
                 </label>
                 <input
-                  id="patient-name"
+                  id="patient-name" aria-label="Patient Full Name"
                   type="text"
                   value={name}
                   onChange={e => {
@@ -328,7 +328,7 @@ export default function PatientProfilePage({
                     Age <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                   </label>
                   <input
-                    id="patient-age"
+                    id="patient-age" aria-label="Patient Age in Years"
                     type="number"
                     min="0"
                     max="130"
@@ -358,8 +358,7 @@ export default function PatientProfilePage({
                   <label htmlFor="patient-sex">
                     Biological Sex <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                   </label>
-                  <select
-                    id="patient-sex"
+                  <select id="patient-sex" aria-label="Patient Biological Sex"
                     value={sex}
                     onChange={e => {
                       setSex(e.target.value)
@@ -422,7 +421,7 @@ export default function PatientProfilePage({
                     <div>
                       <label htmlFor={`symptom-name-${idx}`}>Symptom Name</label>
                       <input
-                        id={`symptom-name-${idx}`}
+                        id={`symptom-name-${idx}`} aria-label={`Symptom ${idx + 1} Name`}
                         type="text"
                         value={sym.name}
                         onChange={e => updateSymptom(idx, 'name', e.target.value)}
@@ -434,7 +433,7 @@ export default function PatientProfilePage({
                         Onset / Duration <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                       </label>
                       <input
-                        id={`symptom-onset-${idx}`}
+                        id={`symptom-onset-${idx}`} aria-label={`Symptom ${idx + 1} Onset`}
                         type="text"
                         value={sym.onset}
                         onChange={e => updateSymptom(idx, 'onset', e.target.value)}
@@ -448,7 +447,7 @@ export default function PatientProfilePage({
                       Symptom Notes <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                     </label>
                     <input
-                      id={`symptom-note-${idx}`}
+                      id={`symptom-note-${idx}`} aria-label={`Symptom ${idx + 1} Note`}
                       type="text"
                       value={sym.note}
                       onChange={e => updateSymptom(idx, 'note', e.target.value)}
@@ -488,7 +487,7 @@ export default function PatientProfilePage({
                 >
                   <div style={{ flex: 1 }}>
                     <input
-                      id={`condition-${idx}`}
+                      id={`condition-${idx}`} aria-label={`Diagnosed Condition ${idx + 1}`}
                       type="text"
                       value={cond.name}
                       onChange={e => updateCondition(idx, e.target.value)}
@@ -554,7 +553,7 @@ export default function PatientProfilePage({
                     <div>
                       <label htmlFor={`allergen-${idx}`}>Allergen Name</label>
                       <input
-                        id={`allergen-${idx}`}
+                        id={`allergen-${idx}`} aria-label={`Allergen ${idx + 1}`}
                         type="text"
                         value={allg.allergen}
                         onChange={e => updateAllergy(idx, 'allergen', e.target.value)}
@@ -566,7 +565,7 @@ export default function PatientProfilePage({
                         Reaction <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                       </label>
                       <input
-                        id={`allergy-reaction-${idx}`}
+                        id={`allergy-reaction-${idx}`} aria-label={`Allergy Reaction ${idx + 1}`}
                         type="text"
                         value={allg.reaction}
                         onChange={e => updateAllergy(idx, 'reaction', e.target.value)}
@@ -577,8 +576,7 @@ export default function PatientProfilePage({
                       <label htmlFor={`allergy-severity-${idx}`}>
                         Severity <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                       </label>
-                      <select
-                        id={`allergy-severity-${idx}`}
+                      <select id={`allergy-severity-${idx}`} aria-label={`Allergy Severity ${idx + 1}`}
                         value={allg.severity}
                         onChange={e => updateAllergy(idx, 'severity', e.target.value)}
                       >
@@ -639,7 +637,7 @@ export default function PatientProfilePage({
                     <div>
                       <label htmlFor={`med-name-${idx}`}>Medication Name</label>
                       <input
-                        id={`med-name-${idx}`}
+                        id={`med-name-${idx}`} aria-label={`Medication ${idx + 1} Name`}
                         type="text"
                         value={med.name}
                         onChange={e => updateMedication(idx, 'name', e.target.value)}
@@ -651,7 +649,7 @@ export default function PatientProfilePage({
                         Dose <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                       </label>
                       <input
-                        id={`med-dose-${idx}`}
+                        id={`med-dose-${idx}`} aria-label={`Medication ${idx + 1} Dose`}
                         type="text"
                         value={med.dose}
                         onChange={e => updateMedication(idx, 'dose', e.target.value)}
@@ -663,7 +661,7 @@ export default function PatientProfilePage({
                         Frequency <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                       </label>
                       <input
-                        id={`med-freq-${idx}`}
+                        id={`med-freq-${idx}`} aria-label={`Medication ${idx + 1} Frequency`}
                         type="text"
                         value={med.frequency}
                         onChange={e => updateMedication(idx, 'frequency', e.target.value)}
@@ -677,7 +675,7 @@ export default function PatientProfilePage({
                       Medication Notes <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
                     </label>
                     <input
-                      id={`med-notes-${idx}`}
+                      id={`med-notes-${idx}`} aria-label={`Medication ${idx + 1} Notes`}
                       type="text"
                       value={med.notes}
                       onChange={e => updateMedication(idx, 'notes', e.target.value)}
@@ -701,7 +699,7 @@ export default function PatientProfilePage({
               Free-Text Observations & Background <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
             </label>
             <textarea
-              id="patient-notes"
+              id="patient-notes" aria-label="Clinical Intake Notes"
               rows={3}
               value={notes}
               onChange={e => {

@@ -485,6 +485,9 @@ export default function ReviewVerificationPage({
 
   return (
     <div className="page-container stack gap-md">
+      <div id="review-live-announcer" className="sr-only" aria-live="polite" aria-atomic="true">
+        {activeDocument ? `Review workspace active for report: ${activeDocument.title}` : 'No report selected'}
+      </div>
       {/* Top Header Card */}
       <div className="card" style={{ padding: '1.25rem 1.5rem' }}>
         <div className="section-head" style={{ marginBottom: '0.75rem' }}>
@@ -536,7 +539,9 @@ export default function ReviewVerificationPage({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <span className="small muted" style={{ fontWeight: 600 }}>Active Report:</span>
             {patientDocs.length > 1 ? (
-              <select
+              <>
+                <label htmlFor="review-doc-select" className="sr-only">Select report to review</label>
+                <select id="review-doc-select" aria-label="Select report document to review" 
                 value={currentDoc?.document_id || ''}
                 onChange={(e) => onSelectDocument && onSelectDocument(e.target.value)}
                 style={{
@@ -552,7 +557,8 @@ export default function ReviewVerificationPage({
                     {doc.title} ({doc.created_at ? doc.created_at.slice(0, 10) : 'Report'})
                   </option>
                 ))}
-              </select>
+                </select>
+              </>
             ) : (
               <strong style={{ fontSize: '13.5px', color: 'var(--text-primary)' }}>
                 {currentDoc?.title || 'No report selected'}
@@ -689,7 +695,7 @@ export default function ReviewVerificationPage({
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <input
                 type="text"
-                placeholder="Search text in report..."
+                id="review-doc-search" aria-label="Search text in source document" placeholder="Search text in report..."
                 value={docSearchTerm}
                 onChange={(e) => setDocSearchTerm(e.target.value)}
                 style={{
@@ -1189,7 +1195,7 @@ export default function ReviewVerificationPage({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div>
                   <label>Measured Value *</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     step="0.01"
                     value={editForm.value}
@@ -1199,7 +1205,7 @@ export default function ReviewVerificationPage({
                 </div>
                 <div>
                   <label>Unit</label>
-                  <input
+                  <input aria-label="input field" 
                     type="text"
                     value={editForm.unit}
                     onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })}
@@ -1210,7 +1216,7 @@ export default function ReviewVerificationPage({
 
               <div>
                 <label>Source Reference Range Raw</label>
-                <input
+                <input aria-label="input field" 
                   type="text"
                   value={editForm.reference_range_raw}
                   onChange={(e) => setEditForm({ ...editForm, reference_range_raw: e.target.value })}
@@ -1221,7 +1227,7 @@ export default function ReviewVerificationPage({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div>
                   <label>Parsed Lower Bound (Min)</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     step="0.01"
                     value={editForm.parsed_min}
@@ -1231,7 +1237,7 @@ export default function ReviewVerificationPage({
                 </div>
                 <div>
                   <label>Parsed Upper Bound (Max)</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     step="0.01"
                     value={editForm.parsed_max}
@@ -1243,7 +1249,7 @@ export default function ReviewVerificationPage({
 
               <div>
                 <label>Clinician Rationale / Audit Notes *</label>
-                <textarea
+                <textarea aria-label="textarea field" 
                   rows={3}
                   value={editForm.notes}
                   onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
@@ -1313,7 +1319,7 @@ export default function ReviewVerificationPage({
 
             <div className="stack gap-sm">
               <label>Reason for Flagging *</label>
-              <textarea
+              <textarea aria-label="textarea field" 
                 rows={3}
                 value={markIncorrectNotes}
                 onChange={(e) => setMarkIncorrectNotes(e.target.value)}
@@ -1437,7 +1443,7 @@ export default function ReviewVerificationPage({
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
                 <div>
                   <label>Test / Observation Name *</label>
-                  <input
+                  <input aria-label="input field" 
                     type="text"
                     value={addForm.test_name}
                     onChange={(e) => setAddForm({ ...addForm, test_name: e.target.value })}
@@ -1447,7 +1453,7 @@ export default function ReviewVerificationPage({
                 </div>
                 <div>
                   <label>Measured Value *</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     step="0.01"
                     value={addForm.value}
@@ -1461,7 +1467,7 @@ export default function ReviewVerificationPage({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
                 <div>
                   <label>Unit</label>
-                  <input
+                  <input aria-label="input field" 
                     type="text"
                     value={addForm.unit}
                     onChange={(e) => setAddForm({ ...addForm, unit: e.target.value })}
@@ -1470,7 +1476,7 @@ export default function ReviewVerificationPage({
                 </div>
                 <div>
                   <label>Source Reference Range Raw</label>
-                  <input
+                  <input aria-label="input field" 
                     type="text"
                     value={addForm.reference_range_raw}
                     onChange={(e) => setAddForm({ ...addForm, reference_range_raw: e.target.value })}
@@ -1482,7 +1488,7 @@ export default function ReviewVerificationPage({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
                 <div>
                   <label>Parsed Min</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     step="0.01"
                     value={addForm.parsed_min}
@@ -1492,7 +1498,7 @@ export default function ReviewVerificationPage({
                 </div>
                 <div>
                   <label>Parsed Max</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     step="0.01"
                     value={addForm.parsed_max}
@@ -1502,7 +1508,7 @@ export default function ReviewVerificationPage({
                 </div>
                 <div>
                   <label>Source Page</label>
-                  <input
+                  <input aria-label="input field" 
                     type="number"
                     value={addForm.source_page}
                     onChange={(e) => setAddForm({ ...addForm, source_page: e.target.value })}
@@ -1513,7 +1519,7 @@ export default function ReviewVerificationPage({
 
               <div>
                 <label>Source Report Snippet / Context</label>
-                <textarea
+                <textarea aria-label="textarea field" 
                   rows={2}
                   value={addForm.source_snippet}
                   onChange={(e) => setAddForm({ ...addForm, source_snippet: e.target.value })}
@@ -1523,7 +1529,7 @@ export default function ReviewVerificationPage({
 
               <div>
                 <label>Clinician Notes</label>
-                <input
+                <input aria-label="input field" 
                   type="text"
                   value={addForm.notes}
                   onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}

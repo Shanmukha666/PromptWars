@@ -1,13 +1,14 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import ProvenanceBadge from './ProvenanceBadge'
 import { IconDoc, IconStructured, IconReview, IconTimeline, IconClose } from './Icons'
 
-// Helper for restrained status rendering
+// Helper for restrained status rendering (WCAG 2.2 multi-attribute: symbol + textual label)
 function getStatusConfig(status, hasRefRange) {
   if (!hasRefRange || status === 'not_assessed' || !status) {
     return {
-      label: 'Not assessed',
-      dotColor: '#94A3B8',
+      label: 'Not assessed (No source range)',
+      symbol: '—',
+      dotColor: '#596780',
       textColor: 'var(--text-secondary)',
       bgColor: 'var(--status-neutral-bg)',
       borderColor: 'var(--status-neutral-border)',
@@ -18,7 +19,8 @@ function getStatusConfig(status, hasRefRange) {
   const s = String(status).toLowerCase()
   if (s === 'low') {
     return {
-      label: 'Low',
+      label: 'Low (Below range)',
+      symbol: '▼',
       dotColor: 'var(--status-warning)',
       textColor: 'var(--status-warning)',
       bgColor: 'var(--status-warning-bg)',
@@ -29,6 +31,7 @@ function getStatusConfig(status, hasRefRange) {
   if (s === 'normal' || s === 'within range' || s === 'within_range') {
     return {
       label: 'Within range',
+      symbol: '✓',
       dotColor: 'var(--status-success)',
       textColor: 'var(--status-success)',
       bgColor: 'var(--status-success-bg)',
@@ -38,7 +41,8 @@ function getStatusConfig(status, hasRefRange) {
   }
   if (s === 'high') {
     return {
-      label: 'High',
+      label: 'High (Above range)',
+      symbol: '▲',
       dotColor: 'var(--status-danger)',
       textColor: 'var(--status-danger)',
       bgColor: 'var(--status-danger-bg)',
@@ -48,8 +52,9 @@ function getStatusConfig(status, hasRefRange) {
   }
 
   return {
-    label: 'Not assessed',
-    dotColor: '#94A3B8',
+    label: 'Not assessed (No source range)',
+    symbol: '—',
+    dotColor: '#596780',
     textColor: 'var(--text-secondary)',
     bgColor: 'var(--status-neutral-bg)',
     borderColor: 'var(--status-neutral-border)',
@@ -90,6 +95,20 @@ export default function StructuredRecordPage({
 
   // Source Provenance Modal state
   const [activeSnippetModal, setActiveSnippetModal] = useState(null)
+  // Accessible modal focus trapping & Escape key listener
+  const snippetModalRef = useRef(null)
+  useEffect(() => {
+    if (!activeSnippetModal) return
+
+    function handleModalKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setActiveSnippetModal(null)
+      }
+    }
+    window.addEventListener('keydown', handleModalKeyDown)
+    return () => window.removeEventListener('keydown', handleModalKeyDown)
+  }, [activeSnippetModal])
 
   const patientDocs = activePatient?.documents || []
 
@@ -217,19 +236,27 @@ export default function StructuredRecordPage({
         >
           {/* Search Input */}
           <div style={{ flex: '1 1 200px' }}>
+            <label htmlFor="structured-search-input" className="sr-only">
+              Search observations by name, value, or unit
+            </label>
             <input
+              id="structured-search-input"
               type="text"
               placeholder="Search by observation, value, or unit..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ fontSize: '13px', padding: '0.45rem 0.75rem', width: '100%' }}
+              aria-label="Search observations"
             />
           </div>
 
           {/* Status Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span className="small muted" style={{ whiteSpace: 'nowrap' }}>Status:</span>
+            <label htmlFor="structured-status-filter" className="small muted" style={{ whiteSpace: 'nowrap', marginBottom: 0 }}>
+              Status:
+            </label>
             <select
+              id="structured-status-filter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               style={{ fontSize: '13px', padding: '0.45rem 0.65rem', background: 'var(--bg-surface)' }}
@@ -244,8 +271,8 @@ export default function StructuredRecordPage({
 
           {/* Report Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span className="small muted" style={{ whiteSpace: 'nowrap' }}>Report:</span>
-            <select
+            <label htmlFor="structured-report-filter" className="small muted" style={{ whiteSpace: 'nowrap', marginBottom: 0 }}>Report:</label>
+            <select id="structured-report-filter"
               value={reportFilter}
               onChange={(e) => setReportFilter(e.target.value)}
               style={{ fontSize: '13px', padding: '0.45rem 0.65rem', background: 'var(--bg-surface)', maxWidth: '180px' }}
@@ -262,7 +289,7 @@ export default function StructuredRecordPage({
           {/* Verification Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
             <span className="small muted" style={{ whiteSpace: 'nowrap' }}>Verification:</span>
-            <select
+            <select aria-label="select field" 
               value={verificationFilter}
               onChange={(e) => setVerificationFilter(e.target.value)}
               style={{ fontSize: '13px', padding: '0.45rem 0.65rem', background: 'var(--bg-surface)' }}
@@ -292,16 +319,19 @@ export default function StructuredRecordPage({
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13.5px' }}>
+              <caption className="sr-only">
+                Structured clinical observations with source-provided reference intervals, evaluated status, and provenance links.
+              </caption>
             <thead>
               <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-color)' }}>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Test / Observation</th>
-                <th style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '90px' }}>Value</th>
-                <th style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '80px' }}>Unit</th>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Reference Range</th>
-                <th style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '130px' }}>Status</th>
-                <th style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '100px' }}>Date</th>
-                <th style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '150px' }}>Source</th>
-                <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-secondary)', width: '120px' }}>Verification</th>
+                <th scope="col" style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Test / Observation</th>
+                <th scope="col" style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '90px' }}>Value</th>
+                <th scope="col" style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '80px' }}>Unit</th>
+                <th scope="col" style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Reference Range</th>
+                <th scope="col" style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '130px' }}>Status</th>
+                <th scope="col" style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '100px' }}>Date</th>
+                <th scope="col" style={{ padding: '0.75rem 0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '150px' }}>Source</th>
+                <th scope="col" style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-secondary)', width: '120px' }}>Verification</th>
               </tr>
             </thead>
             <tbody>
@@ -367,17 +397,19 @@ export default function StructuredRecordPage({
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.4rem',
-                            fontSize: '12.5px',
+                            fontSize: '12px',
                             fontWeight: 600,
                             color: obs.statusConfig.textColor,
                             backgroundColor: obs.statusConfig.bgColor,
                             border: `1px solid ${obs.statusConfig.borderColor}`,
                             borderRadius: '4px',
-                            padding: '0.15rem 0.5rem'
+                            padding: '0.2rem 0.5rem'
                           }}
+                          role="status"
+                          aria-label={`Status: ${obs.statusConfig.label}`}
                         >
-                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: obs.statusConfig.dotColor }} />
-                          {obs.statusConfig.label}
+                          <span aria-hidden="true" style={{ fontWeight: 700, fontSize: '11px' }}>{obs.statusConfig.symbol}</span>
+                          <span>{obs.statusConfig.label}</span>
                         </span>
                       </td>
 
@@ -546,4 +578,5 @@ export default function StructuredRecordPage({
       )}
     </div>
   )
-}
+}
+

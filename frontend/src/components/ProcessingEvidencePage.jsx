@@ -280,6 +280,9 @@ export default function ProcessingEvidencePage({
   if (!currentDoc && stages.length === 0) {
     return (
       <div className="content-container">
+      <div id="pipeline-live-announcer" className="sr-only" aria-live="polite" aria-atomic="true">
+        {loading ? 'Executing transparent pipeline...' : `Processing and Evidence pipeline ready for ${pipelineData?.title || 'current document'}`}
+      </div>
         <div className="card" style={{ padding: '2.5rem', textAlign: 'center', backgroundColor: 'var(--bg-surface)' }}>
           <div style={{ color: 'var(--accent-primary)', marginBottom: '0.75rem' }}>
             <IconProcessing size={36} />
@@ -303,6 +306,9 @@ export default function ProcessingEvidencePage({
 
   return (
     <div className="content-container">
+      <div id="pipeline-live-announcer" className="sr-only" aria-live="polite" aria-atomic="true">
+        {loading ? 'Executing transparent pipeline...' : `Processing and Evidence pipeline ready for ${pipelineData?.title || 'current document'}`}
+      </div>
       {/* Page Header */}
       <div className="section-header" style={{ marginBottom: '1.25rem' }}>
         <div>
@@ -416,7 +422,10 @@ export default function ProcessingEvidencePage({
             return (
               <button
                 key={stage.stage_id}
+                type="button"
                 onClick={() => setActiveStageStep(isSelected ? null : stage.step)}
+                aria-current={isSelected ? 'step' : undefined}
+                aria-label={`Stage ${stage.step}: ${stage.title}, status: ${statusConfig.label}`}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -600,7 +609,10 @@ export default function ProcessingEvidencePage({
               {stage.evidence && stage.evidence.length > 0 && (
                 <div style={{ marginTop: '0.5rem' }}>
                   <button
+                    type="button"
                     onClick={() => toggleEvidence(stage.step)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`stage-evidence-${stage.step}`}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -619,6 +631,7 @@ export default function ProcessingEvidencePage({
 
                   {isExpanded && (
                     <div
+                      id={`stage-evidence-${stage.step}`}
                       style={{
                         marginTop: '0.65rem',
                         backgroundColor: 'var(--bg-canvas, #0F172A)',

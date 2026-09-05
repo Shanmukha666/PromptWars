@@ -19,17 +19,17 @@
 
   /* Typography */
   --text-primary: #172033;
-  --text-secondary: #667085;
-  --text-muted: #94A3B8;
+  --text-secondary: #475467;
+  --text-muted: #596780;
   --text-inverse: #FFFFFF;
 
   /* Brand */
   --brand-primary: #2563EB;
   --brand-hover: #1D4ED8;
   --accent-teal: #0F766E;
-  --status-success: #15803D;
-  --status-warning: #B45309;
-  --status-danger: #B42318;
+  --status-success: #166534;
+  --status-warning: #92400E;
+  --status-danger: #991B1B;
   --status-info: #0369A1;
 
   /* Semantic status tinted backgrounds (calm, accessible) */
@@ -70,6 +70,129 @@ body {
   font-size: var(--font-size-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+
+/* ==========================================================================
+   WCAG 2.2 AA Accessibility & Assistive Tech Enhancements
+   ========================================================================== */
+
+/* Skip Link (WCAG 2.4.1 Bypass Blocks) */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.75rem 1.25rem;
+  background-color: var(--brand-primary);
+  color: var(--text-inverse) !important;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: var(--radius-button);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  text-decoration: none;
+  transition: top 0.15s ease-in-out;
+}
+
+.skip-link:focus {
+  top: 1rem;
+  outline: 3px solid #FFFFFF;
+  outline-offset: 2px;
+}
+
+/* Screen Reader Only Utility (WCAG 1.3.1 Info & Relationships) */
+.sr-only, .visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Universal Visible Focus Indicators (WCAG 2.4.7 Focus Visible & 2.4.11 Focus Appearance) */
+:focus-visible {
+  outline: 2px solid var(--border-focus) !important;
+  outline-offset: 2px !important;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--border-focus) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Reduced Motion Preference (WCAG 2.3.3 Animation from Interactions) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Minimum Interactive Target Sizing (WCAG 2.5.8 Target Size - Minimum 24x24px, recommended 36-44px) */
+button,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+.btn,
+.primary-btn,
+.secondary-btn,
+.help-btn,
+.modal-close-btn,
+.sidebar-close-mobile-btn,
+.mobile-menu-btn {
+  min-height: 36px;
+  min-width: 36px;
+}
+
+/* Semantic Table Accessibility Styling */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  caption-side: top;
+}
+
+caption {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  padding-bottom: 0.5rem;
+  color: var(--text-secondary);
+}
+
+th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-color);
+  padding: 0.65rem 0.75rem;
+}
+
+td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+tr:hover td {
+  background-color: var(--bg-subtle);
+}
+
+/* Live Region Alert Containers */
+[aria-live] {
+  transition: all 0.2s ease-in-out;
 }
 
 /* App Shell Desktop Layout: Sidebar ~240px + Main Area */
