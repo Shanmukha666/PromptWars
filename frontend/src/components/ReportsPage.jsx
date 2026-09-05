@@ -393,6 +393,8 @@ export default function ReportsPage({
         {validationError && (
           <div
             className="error"
+            role="alert"
+            aria-live="assertive"
             style={{
               marginTop: '1rem',
               display: 'flex',

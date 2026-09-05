@@ -140,6 +140,7 @@ export default function ReviewVerificationPage({
   const [isAddingMissing, setIsAddingMissing] = useState(false)
   const [isConfirmingRemove, setIsConfirmingRemove] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
+  const [validationError, setValidationError] = useState('')
 
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -225,9 +226,10 @@ export default function ReviewVerificationPage({
     if (!currentDoc?.document_id || !selectedKey) return
     const numVal = parseFloat(editForm.value)
     if (isNaN(numVal)) {
-      alert('Please enter a valid numeric value.')
+      setValidationError('Please enter a valid numeric value.')
       return
     }
+    setValidationError('')
 
     const pMin = editForm.parsed_min ? parseFloat(editForm.parsed_min) : null
     const pMax = editForm.parsed_max ? parseFloat(editForm.parsed_max) : null
@@ -295,14 +297,15 @@ export default function ReviewVerificationPage({
     if (!currentDoc?.document_id) return
     const cleanName = addForm.test_name.trim().toLowerCase()
     if (!cleanName) {
-      alert('Observation name is required.')
+      setValidationError('Observation name is required.')
       return
     }
     const numVal = parseFloat(addForm.value)
     if (isNaN(numVal)) {
-      alert('Please enter a valid numeric measured value.')
+      setValidationError('Please enter a valid numeric measured value.')
       return
     }
+    setValidationError('')
 
     const pMin = addForm.parsed_min ? parseFloat(addForm.parsed_min) : null
     const pMax = addForm.parsed_max ? parseFloat(addForm.parsed_max) : null
@@ -488,6 +491,14 @@ export default function ReviewVerificationPage({
       <div id="review-live-announcer" className="sr-only" aria-live="polite" aria-atomic="true">
         {activeDocument ? `Review workspace active for report: ${activeDocument.title}` : 'No report selected'}
       </div>
+      {validationError && (
+        <div className="error" role="alert" aria-live="assertive">
+          <span>{validationError}</span>
+          <button type="button" className="secondary-btn btn-sm" onClick={() => setValidationError('')}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Top Header Card */}
       <div className="card" style={{ padding: '1.25rem 1.5rem' }}>
         <div className="section-head" style={{ marginBottom: '0.75rem' }}>
@@ -630,6 +641,8 @@ export default function ReviewVerificationPage({
         {/* Toast Alert */}
         {toastMessage && (
           <div
+            role="status"
+            aria-live="polite"
             style={{
               marginTop: '0.75rem',
               padding: '0.5rem 0.85rem',

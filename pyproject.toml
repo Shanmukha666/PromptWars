@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312", "py313"]
+exclude = '''
+/(\.git|\.venv|venv|data|frontend/node_modules|frontend/dist)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip_glob = ["data/*", "frontend/node_modules/*", "frontend/dist/*"]
+
+[tool.flake8]
+max-line-length = 120
+extend-exclude = [".git", ".venv", "venv", "data", "frontend/node_modules", "frontend/dist"]
+ignore = ["E203", "W503"]

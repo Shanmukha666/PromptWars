@@ -18,7 +18,7 @@ import hashlib
 
 # PDF parsing
 try:
-    import PyPDF2
+    import pypdf
     import pdfplumber
     PDF_AVAILABLE = True
 except ImportError:
@@ -152,22 +152,22 @@ class PDFParser:
                 return text, metadata, tables
                 
             except Exception as e:
-                logger.warning(f"pdfplumber failed: {e}, falling back to PyPDF2")
+                logger.warning(f"pdfplumber failed: {e}, falling back to pypdf")
         
-        # Fallback to PyPDF2
+        # Fallback to pypdf
         try:
             with open(file_path, 'rb') as f:
-                reader = PyPDF2.PdfReader(f)
+                reader = pypdf.PdfReader(f)
                 metadata["pages"] = len(reader.pages)
                 metadata["encrypted"] = reader.is_encrypted
-                
+
                 for page_num, page in enumerate(reader.pages):
                     page_text = page.extract_text()
                     if page_text:
                         text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
-                
+
             return text, metadata, tables
-            
+
         except Exception as e:
             logger.error(f"PDF parsing failed: {e}")
             raise

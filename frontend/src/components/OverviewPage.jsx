@@ -17,20 +17,24 @@ export default function OverviewPage({
   if (!activePatient) {
     return (
       <div className="page-container stack gap-md">
-        <div className="card" style={{ padding: '2rem 1.5rem', textAlign: 'center', background: 'var(--bg-surface)' }}>
-          <div style={{ display: 'inline-flex', padding: '0.75rem', borderRadius: '50%', background: 'var(--status-info-bg)', color: 'var(--brand-primary)', marginBottom: '0.75rem' }}>
+        <div className="card overview-empty-state">
+          <div className="overview-empty-mark" aria-hidden="true">
             <IconPatient size={32} />
           </div>
-          <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-            No Patient Selected
-          </h2>
-          <p className="small muted" style={{ maxWidth: '480px', margin: '0 auto 1.25rem auto' }}>
-            Select an existing patient profile to inspect their clinical summary, extracted lab observations, review status, and longitudinal trends.
-          </p>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+          <div className="overview-empty-copy">
+            <span className="eyebrow">Clinical workspace</span>
+            <h2>No patient context selected</h2>
+            <p className="small muted">
+              Choose a record from the directory or create a new patient context to begin reviewing clinical evidence.
+            </p>
             <button onClick={onNewPatient} className="primary-btn">
               + Intake New Patient
             </button>
+          </div>
+          <div className="overview-empty-metrics" aria-label="Workspace overview">
+            <div><strong>{patients.length}</strong><span>Patients</span></div>
+            <div><strong>{documents.length}</strong><span>Reports</span></div>
+            <div><strong>Local</strong><span>Data mode</span></div>
           </div>
         </div>
 
@@ -78,7 +82,7 @@ export default function OverviewPage({
                         onSelectPatient(pat.patient_id)
                       }}
                     >
-                      Open Record
+                      Open Record &rarr;
                     </button>
                   </div>
                 ))}

@@ -14,14 +14,27 @@ import ProcessingEvidencePage from './components/ProcessingEvidencePage'
 import { DEMO_DATA } from './demoData'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const REQUEST_TIMEOUT_MS = 15000
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, options)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || `Request failed: ${res.status}`)
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { ...options, signal: controller.signal })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `Request failed: ${res.status}`)
+    }
+    return res.json()
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('The clinical service took too long to respond. Please try again.')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
   }
-  return res.json()
 }
 
 export default function App() {
@@ -43,16 +56,22 @@ export default function App() {
   const [dismissDemoBanner, setDismissDemoBanner] = useState(false)
 
   useEffect(() => {
-    refreshAll()
+    let isMounted = true
+
+    refreshAll(isMounted).catch(() => {})
+    return () => {
+      isMounted = false
+    }
   }, [])
 
-  async function refreshAll() {
+  async function refreshAll(isMounted = true) {
     try {
       const [healthData, docsData, patientsData] = await Promise.all([
         request('/api/health'),
         request('/api/documents'),
         request('/api/patients')
       ])
+      if (!isMounted) return
       setHealth(healthData)
       setDocuments(docsData.items || [])
       setPatients(patientsData.items || [])
@@ -392,7 +411,7 @@ export default function App() {
         />
 
         {/* Scrollable Main Content Region */}
-        <main id="main-content" tabIndex="-1" role="main" className="main-content">
+        <main id="main-content" tabIndex="-1" role="main" className="main-content" aria-busy={loading}>
           {/* WCAG 4.1.3 Screen Reader Live Announcement Region */}
           <div
             id="a11y-live-region"
@@ -412,7 +431,7 @@ export default function App() {
 
           {/* System Error Notification */}
           {error && (
-            <div className="error" role="alert" aria-live="assertive" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="error" role="alert" aria-live="assertive" aria-label="Clinical service error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>{error}</span>
               <button
                 className="secondary-btn btn-sm"

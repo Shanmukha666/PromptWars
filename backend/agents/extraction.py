@@ -11,8 +11,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neural_network import MLPClassifier
 import pickle
 import os
+import logging
 
 from .base_agent import DynamicAgent, NeuralMemory, LearningSignal
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionAgent(DynamicAgent):
