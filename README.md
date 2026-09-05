@@ -1,4 +1,4 @@
-# Clinical Intelligence Copilot — Multi-Agent Featherless RAG
+# MedLens — Clinical Intelligence Copilot with Google Gemini
 
 This version keeps the original logic intact:
 
@@ -13,7 +13,7 @@ It adds the hackathon layer on top:
 - simulation mode for lab values
 - evidence cards for explainability
 - API demo panel for platform storytelling
-- offline fallback mode so the app still works without a Featherless key
+- offline fallback mode so the app still works without a Google Gemini key
 
 ## What changed
 
@@ -33,7 +33,7 @@ It adds the hackathon layer on top:
   - validation agent
   - critic agent
   - explanation agent
-- added offline summary and QA fallbacks when `FEATHERLESS_API_KEY` is missing
+- added offline summary and QA fallbacks when `GEMINI_API_KEY` is missing
 - preserved the original endpoints:
   - `GET /api/health`
   - `GET /api/documents`
@@ -63,9 +63,9 @@ npm run dev
 Optional for live LLM mode:
 
 ```bash
-FEATHERLESS_API_KEY=your_key_here
-FEATHERLESS_MODEL=Qwen/Qwen2.5-7B-Instruct
-FEATHERLESS_BASE_URL=https://api.featherless.ai/v1
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-1.5-flash
+GEMINI_BASE_URL=https://api.featherless.ai/v1
 ```
 
 Without a key, the app uses offline heuristic fallback logic so the demo still runs.

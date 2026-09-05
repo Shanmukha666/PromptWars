@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from backend.llm import FeatherlessClient, FeatherlessError
+from backend.llm import GeminiClient, GeminiError, FeatherlessClient, FeatherlessError
 from backend.reference_range import extract_labs_from_report, parse_source_reference_range, evaluate_clinical_status
 from backend.retrieval import RetrievalStore
 from services.parser import get_parser_service
@@ -96,7 +96,7 @@ class Analyzer:
     def __init__(self) -> None:
         self.parser = get_parser_service()
         self.store = RetrievalStore(INDEX_DIR)
-        self.llm = FeatherlessClient()
+        self.llm = GeminiClient()
 
     async def ingest_file(self, upload: UploadFile, title: Optional[str] = None, patient_id: Optional[str] = None) -> Dict[str, Any]:
         if not upload.filename or not upload.filename.strip():
@@ -723,11 +723,16 @@ def health() -> Dict[str, Any]:
     docs = analyzer.store.list_documents(limit=200)
     return {
         'status': 'ok',
+        'gemini': {
+            'configured': analyzer.llm.configured,
+            'model': getattr(analyzer.llm, 'model', 'gemini-1.5-flash'),
+            'base_url': getattr(analyzer.llm, 'base_url', 'https://generativelanguage.googleapis.com/v1beta'),
+            'mode': 'live-gemini-llm' if analyzer.llm.configured else 'offline-heuristic-fallback',
+        },
         'featherless': {
             'configured': analyzer.llm.configured,
-            'base_url': os.getenv('FEATHERLESS_BASE_URL', 'https://api.featherless.ai/v1'),
-            'model': os.getenv('FEATHERLESS_MODEL', 'Qwen/Qwen2.5-7B-Instruct'),
-            'mode': 'live-llm' if analyzer.llm.configured else 'offline-heuristic-fallback',
+            'model': getattr(analyzer.llm, 'model', 'gemini-1.5-flash'),
+            'mode': 'live-gemini-llm' if analyzer.llm.configured else 'offline-heuristic-fallback',
         },
         'storage': {'documents': len(docs), 'upload_dir': str(UPLOAD_DIR), 'index_dir': str(INDEX_DIR)},
         'features': [

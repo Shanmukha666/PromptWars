@@ -23,17 +23,17 @@ export default function SettingsModal({ isOpen, onClose, health, documentsCount,
             <div className="stack gap-sm">
               <div className="meta-row small">
                 <span className="muted">Extractor Mode:</span>
-                <strong style={{ color: health?.featherless?.configured ? 'var(--status-success)' : 'var(--status-warning)' }}>
-                  {health?.featherless?.configured ? 'Live Featherless / DeepSeek LLM' : 'Deterministic Heuristic Fallback'}
+                <strong style={{ color: (health?.gemini?.configured || health?.featherless?.configured) ? 'var(--status-success)' : 'var(--status-warning)' }}>
+                  {(health?.gemini?.configured || health?.featherless?.configured) ? 'Live Google Gemini LLM' : 'Deterministic Heuristic Fallback'}
                 </strong>
               </div>
               <div className="meta-row small">
                 <span className="muted">Model:</span>
-                <code>{health?.featherless?.model || 'deepseek-ai/DeepSeek-V3'}</code>
+                <code>{health?.gemini?.model || health?.featherless?.model || 'gemini-1.5-flash'}</code>
               </div>
               <div className="meta-row small">
                 <span className="muted">API Base:</span>
-                <code>{health?.featherless?.base_url || 'https://api.featherless.ai/v1'}</code>
+                <code>{health?.gemini?.base_url || 'https://generativelanguage.googleapis.com'}</code>
               </div>
               <div className="meta-row small">
                 <span className="muted">Clinical Guardrails:</span>

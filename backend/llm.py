@@ -2,24 +2,47 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import requests
 
-FEATHERLESS_BASE_URL = os.getenv('FEATHERLESS_BASE_URL', 'https://api.featherless.ai/v1').rstrip('/')
-FEATHERLESS_MODEL = os.getenv('FEATHERLESS_MODEL', 'Qwen/Qwen2.5-7B-Instruct')
-FEATHERLESS_TIMEOUT = float(os.getenv('FEATHERLESS_TIMEOUT', '90'))
+GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta').rstrip('/')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+GEMINI_TIMEOUT = float(os.getenv('GEMINI_TIMEOUT', '90'))
 
 
-class FeatherlessError(RuntimeError):
+class GeminiError(RuntimeError):
     pass
 
 
-class FeatherlessClient:
+# Backwards compatibility alias
+FeatherlessError = GeminiError
+
+
+def _strip_markdown_json(text: str) -> str:
+    """Strip ```json ... ``` markdown wrappers if returned by the LLM."""
+    s = text.strip()
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', s)
+    if match:
+        return match.group(1).strip()
+    return s
+
+
+class GeminiClient:
+    """
+    Google Gemini LLM client for clinical extraction, summarization, and grounded Q&A.
+    Supports native Google Generative Language API (generateContent) and OpenAI-compatible proxy endpoints.
+    """
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or os.getenv('FEATHERLESS_API_KEY', '').strip()
-        self.base_url = (base_url or FEATHERLESS_BASE_URL).rstrip('/')
-        self.model = model or FEATHERLESS_MODEL
+        self.api_key = (
+            api_key 
+            or os.getenv('GEMINI_API_KEY', '').strip() 
+            or os.getenv('GOOGLE_API_KEY', '').strip()
+            or os.getenv('FEATHERLESS_API_KEY', '').strip()
+        )
+        self.base_url = (base_url or os.getenv('GEMINI_BASE_URL') or GEMINI_BASE_URL).rstrip('/')
+        self.model = model or os.getenv('GEMINI_MODEL') or GEMINI_MODEL
 
     @property
     def configured(self) -> bool:
@@ -27,10 +50,105 @@ class FeatherlessClient:
 
     def require(self) -> None:
         if not self.configured:
-            raise FeatherlessError('FEATHERLESS_API_KEY is required. Add it to your .env before starting the backend.')
+            raise GeminiError('GEMINI_API_KEY is required. Add GEMINI_API_KEY=your_key to your .env file.')
 
-    def chat(self, messages: List[Dict[str, Any]], *, temperature: float = 0.2, max_tokens: int = 1200, response_format: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1200,
+        response_format: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         self.require()
+
+        # Check if using an OpenAI-compatible proxy or native Gemini API
+        if '/chat/completions' in self.base_url or '/openai' in self.base_url:
+            return self._chat_openai_compatible(messages, temperature=temperature, max_tokens=max_tokens, response_format=response_format)
+        return self._chat_gemini_native(messages, temperature=temperature, max_tokens=max_tokens, response_format=response_format)
+
+    def _chat_gemini_native(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1200,
+        response_format: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Call Google Generative Language API via native REST endpoint."""
+        contents: List[Dict[str, Any]] = []
+        system_instruction: Optional[Dict[str, Any]] = None
+
+        for msg in messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if role == 'system':
+                system_instruction = {'parts': [{'text': content}]}
+            elif role == 'assistant':
+                contents.append({'role': 'model', 'parts': [{'text': content}]})
+            else:
+                contents.append({'role': 'user', 'parts': [{'text': content}]})
+
+        if not contents and system_instruction:
+            contents.append({'role': 'user', 'parts': [{'text': 'Begin processing based on instruction.'}]})
+
+        generation_config: Dict[str, Any] = {
+            'temperature': temperature,
+            'maxOutputTokens': max_tokens,
+        }
+        if response_format and response_format.get('type') == 'json_object':
+            generation_config['responseMimeType'] = 'application/json'
+
+        payload: Dict[str, Any] = {
+            'contents': contents,
+            'generationConfig': generation_config,
+        }
+        if system_instruction:
+            payload['systemInstruction'] = system_instruction
+
+        model_name = self.model
+        if model_name.startswith('models/'):
+            model_name = model_name[7:]
+
+        endpoint = f"{self.base_url}/models/{model_name}:generateContent?key={self.api_key}"
+
+        try:
+            response = requests.post(
+                endpoint,
+                headers={'Content-Type': 'application/json'},
+                json=payload,
+                timeout=GEMINI_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            raise GeminiError(f"Gemini connection error: {exc}") from exc
+
+        if not response.ok:
+            raise GeminiError(f"Gemini request failed ({response.status_code}): {response.text[:500]}")
+
+        data = response.json()
+        try:
+            candidates = data.get('candidates', [])
+            if not candidates:
+                raise GeminiError(f"Gemini returned no candidates: {data}")
+            parts = candidates[0].get('content', {}).get('parts', [])
+            if not parts:
+                raise GeminiError(f"Gemini candidate has no content parts: {candidates[0]}")
+            raw_text = parts[0].get('text', '')
+            content = _strip_markdown_json(raw_text)
+        except Exception as exc:
+            raise GeminiError(f"Unexpected Gemini response structure: {data}") from exc
+
+        return {'raw': data, 'content': content}
+
+    def _chat_openai_compatible(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1200,
+        response_format: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Fallback for OpenAI-compatible Gemini proxy endpoints."""
         payload: Dict[str, Any] = {
             'model': self.model,
             'messages': messages,
@@ -40,22 +158,30 @@ class FeatherlessClient:
         if response_format:
             payload['response_format'] = response_format
 
-        response = requests.post(
-            f'{self.base_url}/chat/completions',
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {self.api_key}',
-            },
-            json=payload,
-            timeout=FEATHERLESS_TIMEOUT,
-        )
+        endpoint = self.base_url if self.base_url.endswith('/chat/completions') else f"{self.base_url}/chat/completions"
+        try:
+            response = requests.post(
+                endpoint,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {self.api_key}',
+                },
+                json=payload,
+                timeout=GEMINI_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            raise GeminiError(f"Gemini proxy connection error: {exc}") from exc
+
         if not response.ok:
-            raise FeatherlessError(f'Featherless request failed ({response.status_code}): {response.text[:500]}')
+            raise GeminiError(f"Gemini proxy request failed ({response.status_code}): {response.text[:500]}")
+
         data = response.json()
         try:
-            content = data['choices'][0]['message']['content']
+            raw_text = data['choices'][0]['message']['content']
+            content = _strip_markdown_json(raw_text)
         except Exception as exc:
-            raise FeatherlessError(f'Unexpected Featherless response: {data}') from exc
+            raise GeminiError(f"Unexpected Gemini proxy response: {data}") from exc
+
         return {'raw': data, 'content': content}
 
     def extract_clinical_data(self, text: str) -> Dict[str, Any]:
@@ -92,7 +218,7 @@ class FeatherlessClient:
         try:
             return json.loads(result['content'])
         except json.JSONDecodeError as exc:
-            raise FeatherlessError(f'Failed to parse Featherless JSON output: {result["content"][:500]}') from exc
+            raise GeminiError(f'Failed to parse Gemini JSON output: {result["content"][:500]}') from exc
 
     def summarize_document(self, *, title: str, text: str, metadata: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
         prompt = (
@@ -126,7 +252,7 @@ class FeatherlessClient:
         try:
             return json.loads(result['content'])
         except json.JSONDecodeError as exc:
-            raise FeatherlessError(f'Failed to parse Featherless JSON output: {result["content"][:500]}') from exc
+            raise GeminiError(f'Failed to parse Gemini JSON output: {result["content"][:500]}') from exc
 
     def answer_with_context(self, *, question: str, context_chunks: List[Dict[str, Any]], document_title: Optional[str] = None) -> Dict[str, Any]:
         context_text = '\n\n'.join(
@@ -160,4 +286,8 @@ class FeatherlessClient:
         try:
             return json.loads(result['content'])
         except json.JSONDecodeError as exc:
-            raise FeatherlessError(f'Failed to parse Featherless JSON answer: {result["content"][:500]}') from exc
+            raise GeminiError(f'Failed to parse Gemini JSON answer: {result["content"][:500]}') from exc
+
+
+# Backwards compatibility alias
+FeatherlessClient = GeminiClient
