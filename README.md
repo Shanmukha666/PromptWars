@@ -58,6 +58,23 @@ npm install
 npm run dev
 ```
 
+## Running Tests
+
+The test suite covers backend clinical safety, extraction boundaries, reference interval rules, session security, and frontend workflow components.
+
+### Backend Tests (pytest)
+```bash
+# Run all backend tests
+python -m pytest tests/ -v
+```
+
+### Frontend Tests (Vitest + Testing Library)
+```bash
+# Run all frontend tests
+cd frontend
+npm test
+```
+
 ## Environment
 
 Optional for live LLM mode:

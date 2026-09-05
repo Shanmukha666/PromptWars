@@ -20,7 +20,7 @@ export default function ReportsPage({
   onUploadText,
   onSelectDocument,
   onProceedToStructured,
-  loading: externalLoading
+  loading = false
 }) {
   const [dragActive, setDragActive] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState([])
@@ -159,7 +159,7 @@ export default function ReportsPage({
     }
   }
 
-  const isBusy = Boolean(processingState && processingState !== 'Complete' && processingState !== 'Failed') || externalLoading
+  const isBusy = Boolean(processingState && processingState !== 'Complete' && processingState !== 'Failed') || loading
 
   return (
     <div className="page-grid two-col" style={{ alignItems: 'start' }} id="reports-page-root">
