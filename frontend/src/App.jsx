@@ -10,6 +10,7 @@ import ReportsPage from './components/ReportsPage'
 import StructuredRecordPage from './components/StructuredRecordPage'
 import ReviewVerificationPage from './components/ReviewVerificationPage'
 import TimelineHistoryPage from './components/TimelineHistoryPage'
+import { DEMO_DATA } from './demoData'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -37,6 +38,8 @@ export default function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
+  const [isDemoMode, setIsDemoMode] = useState(false)
+  const [dismissDemoBanner, setDismissDemoBanner] = useState(false)
 
   useEffect(() => {
     refreshAll()
@@ -52,11 +55,24 @@ export default function App() {
       setHealth(healthData)
       setDocuments(docsData.items || [])
       setPatients(patientsData.items || [])
+      setIsDemoMode(false)
       if (activePatient?.patient_id) {
         await openPatient(activePatient.patient_id, false)
       }
     } catch (err) {
-      setError(err.message)
+      console.warn('Backend API connection failed, initializing browser preview demo mode:', err)
+      setIsDemoMode(true)
+      setHealth(DEMO_DATA.health)
+      setPatients(DEMO_DATA.patients)
+      const allDocs = DEMO_DATA.patients.flatMap(p => p.documents || [])
+      setDocuments(allDocs)
+      if (!activePatient && DEMO_DATA.patients.length > 0) {
+        const firstPat = DEMO_DATA.patients[0]
+        setActivePatient(firstPat)
+        if (firstPat.documents?.length > 0) {
+          setActiveDocument(firstPat.documents[0])
+        }
+      }
     }
   }
 
@@ -64,6 +80,19 @@ export default function App() {
     setLoading(true)
     setError('')
     try {
+      if (isDemoMode) {
+        const found = patients.find(p => p.patient_id === patientId) || DEMO_DATA.patients[0]
+        setActivePatient(found)
+        if (found?.documents?.length > 0) {
+          setActiveDocument(found.documents[0])
+        } else {
+          setActiveDocument(null)
+        }
+        if (navigateToProfile) {
+          setStage('profile')
+        }
+        return
+      }
       const data = await request(`/api/patients/${patientId}`)
       setActivePatient(data)
       if (data.documents && data.documents.length > 0) {
@@ -85,6 +114,13 @@ export default function App() {
     setLoading(true)
     setError('')
     try {
+      if (isDemoMode) {
+        const doc = documents.find(d => d.document_id === documentId) || 
+                    activePatient?.documents?.find(d => d.document_id === documentId) ||
+                    DEMO_DATA.patients[0].documents[0]
+        setActiveDocument(doc)
+        return
+      }
       const data = await request(`/api/documents/${documentId}`)
       setActiveDocument(data)
     } catch (err) {
@@ -169,6 +205,47 @@ export default function App() {
     setLoading(true)
     setError('')
     try {
+      if (isDemoMode) {
+        if (activeDocument && activeDocument.extracted?.labs) {
+          const updatedLabs = { ...activeDocument.extracted.labs }
+          const action = verificationPayload.action || 'verify'
+          const key = verificationPayload.test_key
+          if (action === 'remove') {
+            delete updatedLabs[key]
+          } else if (action === 'add') {
+            updatedLabs[key] = {
+              test_name: verificationPayload.test_name || key,
+              display_name: (verificationPayload.test_name || key).toUpperCase(),
+              value: verificationPayload.value,
+              unit: verificationPayload.unit || '',
+              reference_range_raw: verificationPayload.reference_range_raw,
+              reference_range_low: verificationPayload.reference_range_low,
+              reference_range_high: verificationPayload.reference_range_high,
+              reference_range_operator: 'between',
+              reference_range: verificationPayload.reference_range_low != null ? { min: verificationPayload.reference_range_low, max: verificationPayload.reference_range_high } : null,
+              status: verificationPayload.status || 'not_assessed',
+              source_snippet: verificationPayload.source_snippet || 'Clinician manual observation',
+              verification_status: 'verified',
+              provenance_type: 'user_verified'
+            }
+          } else if (updatedLabs[key]) {
+            updatedLabs[key] = {
+              ...updatedLabs[key],
+              value: verificationPayload.value ?? updatedLabs[key].value,
+              unit: verificationPayload.unit ?? updatedLabs[key].unit,
+              status: verificationPayload.status ?? updatedLabs[key].status,
+              verification_status: action === 'mark_incorrect' ? 'incorrect' : (action === 'edit' ? 'edited' : 'verified'),
+              provenance_type: 'user_verified'
+            }
+          }
+          const updatedDoc = {
+            ...activeDocument,
+            extracted: { ...activeDocument.extracted, labs: updatedLabs }
+          }
+          setActiveDocument(updatedDoc)
+        }
+        return
+      }
       const res = await request('/api/documents/verify-lab', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
