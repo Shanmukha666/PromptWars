@@ -73,7 +73,7 @@ class ParserConfig:
     CACHE_PARSED_RESULTS = os.getenv("CACHE_PARSER", "True").lower() == "true"
     CACHE_DIR = Path("/tmp/parser_cache")
     
-    # Max file size (50MB)
+    # Max file size (10MB, aligned with the live ingestion service)
     MAX_FILE_SIZE = 50 * 1024 * 1024
 
 

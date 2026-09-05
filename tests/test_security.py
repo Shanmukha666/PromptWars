@@ -77,6 +77,20 @@ class TestSessionIsolation:
         del_res = client.delete(f"/api/patients/{pid}", headers=alt_auth_headers)
         assert del_res.status_code == 404
 
+    def test_document_cannot_attach_to_other_session_patient(self, client, auth_headers, alt_auth_headers):
+        create_res = client.post(
+            "/api/patients",
+            json={"name": "Scoped Patient", "age": 42},
+            headers=auth_headers,
+        )
+        patient_id = create_res.json()["patient_id"]
+        ingest_res = client.post(
+            "/api/ingest/text",
+            json={"title": "Cross-session report", "text": "Hemoglobin: 14 g/dL", "patient_id": patient_id},
+            headers=alt_auth_headers,
+        )
+        assert ingest_res.status_code == 404
+
 
 class TestUploadSecurity:
     """Upload boundary validation beyond basic ingestion tests."""

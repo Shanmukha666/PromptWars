@@ -58,12 +58,12 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
     # Security
-    API_KEY: str = os.getenv("API_KEY", "default-dev-key-change-in-production")
+    API_KEY: str = os.getenv("API_KEY", "").strip()
     ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000").split(",")
     ALLOWED_HOSTS: List[str] = os.getenv("ALLOWED_HOSTS", "*").split(",")
     
     # File upload
-    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
+    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # Keep legacy boundary aligned with the live API
     ALLOWED_EXTENSIONS: set = {".txt", ".pdf", ".png", ".jpg", ".jpeg", ".json"}
     TEMP_DIR: Path = Path("/tmp/clinical_uploads")
     

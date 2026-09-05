@@ -30,10 +30,14 @@ class ExtractionService:
             "ibuprofen", "aspirin", "atorvastatin", "albuterol",
             "omeprazole", "levothyroxine"
         ]
+        allergy_pool = [
+            "penicillin", "amoxicillin", "sulfa", "sulfonamide", "latex", "peanuts", "shellfish"
+        ]
         return {
             "symptoms": [s for s in symptom_pool if s in t],
             "conditions": [c for c in condition_pool if c in t],
             "medications": [m for m in medication_pool if m in t],
+            "allergies": [a for a in allergy_pool if a in t and "allerg" in t],
         }
 
     def extract_sections(self, text: str) -> Dict[str, str]:

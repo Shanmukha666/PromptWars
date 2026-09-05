@@ -77,6 +77,7 @@ export default function Sidebar({
               return (
                 <button
                   key={item.key}
+                  data-stage={item.key}
                   type="button"
                   className={`sidebar-nav-btn ${isActive ? 'active' : ''}`}
                   onClick={() => {

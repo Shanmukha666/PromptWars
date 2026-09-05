@@ -74,3 +74,14 @@ def test_mandatory_footer_cannot_be_overridden_by_model_fields():
     })
     assert "diagnosis" not in schema.footer.lower() or "does not provide" in schema.footer.lower()
     assert schema.footer == MANDATORY_FOOTER
+
+
+def test_unsafe_language_is_rejected_in_all_summary_lists():
+    with pytest.raises(ValueError):
+        ClinicalSummarySchema(
+            overview="Factual overview.",
+            key_findings=["We prescribe a new treatment."],
+            outside_source_ranges=[],
+            medication_allergy_info=[],
+            items_needing_review=[],
+        )

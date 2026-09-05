@@ -29,7 +29,7 @@ It adds the hackathon layer on top:
 - added deterministic multi-agent orchestration output:
   - ingestion agent
   - retrieval agent
-  - diagnosis agent
+  - safety validation agent
   - validation agent
   - critic agent
   - explanation agent
@@ -86,6 +86,18 @@ GEMINI_BASE_URL=https://api.featherless.ai/v1
 ```
 
 Without a key, the app uses offline heuristic fallback logic so the demo still runs.
+
+## Vercel preview deployment
+
+The Vercel target is the frontend only. Without a separately deployed API, the browser uses bundled synthetic demo records. Set `VITE_API_BASE_URL` only for an API deployed with restricted CORS. Never expose `GEMINI_API_KEY` or backend secrets to the browser.
+
+```bash
+cd frontend
+npm run build
+npx vercel --prod
+```
+
+This prototype does not provide production identity authentication, encrypted-at-rest storage, retention deletion, or regulatory compliance. Use synthetic or de-identified data only.
 
 ## Hackathon pitch angle
 

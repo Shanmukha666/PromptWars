@@ -1,6 +1,6 @@
 /* MedLens Healthcare SaaS Design System Tokens */
 :root {
-  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family: "Aptos", "Segoe UI", sans-serif;
   --font-size-page-title: 28px;
   --font-size-section: 18px;
   --font-size-body: 14px;
@@ -374,6 +374,64 @@ tr:hover td {
   color: var(--text-primary);
 }
 
+.sidebar-nav-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.sidebar-nav-btn:hover {
+  background-color: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+.sidebar-nav-btn.active {
+  background-color: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  color: var(--brand-primary);
+  font-weight: 600;
+}
+
+.sidebar-nav-btn svg {
+  flex: 0 0 auto;
+}
+
+.sidebar-btn-label {
+  flex: 1;
+}
+
+.sidebar-badge {
+  min-width: 22px;
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  background-color: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sidebar-nav-btn.active .sidebar-badge {
+  background-color: #BAE6FD;
+  color: var(--brand-primary);
+}
+
+.sidebar-footer-btn:hover {
+  background-color: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
 /* Shell Main Container (TopBar + Content) */
 .main-wrapper {
   flex: 1;
@@ -626,7 +684,7 @@ p {
 }
 
 .card.tall {
-  min-height: 480px;
+  min-height: 0;
 }
 
 .page-container {
@@ -1054,5 +1112,229 @@ button:disabled {
   .patient-select {
     min-width: 140px;
     max-width: 180px;
+  }
+}
+
+/* Shared page polish and compatibility for the processing workspace. */
+.content-container {
+  width: 100%;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.patient-directory-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.patient-directory-details {
+  min-width: 0;
+}
+
+.patient-directory-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.patient-directory-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.patient-directory-meta {
+  overflow-wrap: anywhere;
+}
+
+.section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.page-title {
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.section-subtitle {
+  max-width: 720px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.btn {
+  min-height: 36px;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-button);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-primary {
+  background-color: var(--brand-primary);
+  border: 1px solid var(--brand-primary);
+  color: var(--text-inverse);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--brand-hover);
+  border-color: var(--brand-hover);
+}
+
+.btn-secondary {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--bg-subtle);
+}
+
+.badge-primary {
+  background-color: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  color: var(--status-info);
+}
+
+.workflow-nav {
+  overflow-x: auto;
+}
+
+@media (max-width: 1024px) {
+  .main-content {
+    max-width: none;
+  }
+
+  .section-header {
+    flex-direction: column;
+  }
+
+  .section-header > :last-child {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding: 1rem 0.75rem 1.5rem;
+    gap: 1rem;
+  }
+
+  .top-bar {
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .top-bar-left {
+    flex: 1;
+    min-width: 0;
+    gap: 0.6rem;
+  }
+
+  .patient-selector-wrap,
+  .patient-select-controls {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .top-bar-label,
+  .demographic-context-pill,
+  .privacy-badge {
+    display: none;
+  }
+
+  .patient-select {
+    min-width: 0;
+    max-width: none;
+    flex: 1;
+  }
+
+  .top-bar-right {
+    gap: 0.35rem;
+  }
+
+  .help-btn {
+    padding-inline: 0.5rem;
+  }
+
+  .card {
+    padding: 1rem;
+    border-radius: 8px;
+  }
+
+  .section-head,
+  .meta-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .section-head > :last-child,
+  .meta-row > :last-child {
+    width: 100%;
+  }
+
+  .section-header .page-title {
+    font-size: 21px;
+  }
+
+  .review-split-workspace > .card {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .dropzone {
+    padding: 1.5rem 1rem !important;
+  }
+
+  .page-grid.two-col {
+    gap: 1rem;
+  }
+
+  .content-container .card {
+    padding: 1rem;
+  }
+
+  .content-container .section-subtitle {
+    font-size: 12.5px;
+  }
+
+  .patient-directory-row {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .patient-directory-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+  }
+
+  .patient-directory-row .secondary-btn {
+    flex: 0 0 auto;
+  }
+
+  .btn,
+  .primary-btn,
+  .secondary-btn {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 390px) {
+  .patient-select-controls .secondary-btn {
+    display: none;
+  }
+
+  .workflow-nav {
+    margin-inline: -0.25rem;
   }
 }

@@ -66,15 +66,18 @@ class SummaryService:
             )
 
         meds = extracted.get("entities", {}).get("medications", [])
-        med_allergy_info = [f"Medications noted: {', '.join(meds)}"] if meds else ["No active medications recorded in this report."]
+        allergies = extracted.get("entities", {}).get("allergies", [])
+        med_allergy_info = []
+        med_allergy_info.append(f"Medications noted: {', '.join(meds)}" if meds else "No active medications recorded in this report.")
+        med_allergy_info.append(f"Allergies noted: {', '.join(allergies)}" if allergies else "No allergies recorded in this report.")
 
         return {
             "overview": f"Clinical record '{title}' processed. Extracted {len(labs)} laboratory test observation(s) and clinical context entries.",
             "key_findings": [
                 f"Extracted {len(labs)} laboratory observation(s) directly from source document.",
-                f"{len(outside)} observation(s) fall outside source-provided reference ranges." if outside else "All parameters with source-provided ranges fall within expected intervals.",
+                    f"{len(outside)} observation(s) fall outside source-provided reference ranges." if outside else "All parameters with explicitly provided source ranges are within those ranges.",
             ],
-            "outside_source_ranges": outside if outside else ["None. All tests with explicit source reference ranges fall within expected bounds."],
+            "outside_source_ranges": outside if outside else ["None. No observation is outside an explicitly provided source range."],
             "medication_allergy_info": med_allergy_info,
             "items_needing_review": items_needing_review if items_needing_review else ["Extraction verified against source document text."],
             "footer": MANDATORY_FOOTER,

@@ -53,11 +53,8 @@ export default function OverviewPage({
                 {patients.map((pat) => (
                   <div
                     key={pat.patient_id}
-                    className="card"
+                    className="card patient-directory-row"
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
                       padding: '1rem',
                       cursor: 'pointer',
                       border: '1px solid var(--border-color)',
@@ -65,12 +62,12 @@ export default function OverviewPage({
                     }}
                     onClick={() => onSelectPatient(pat.patient_id)}
                   >
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <div className="patient-directory-details">
+                      <div className="patient-directory-heading">
                         <strong style={{ fontSize: '15px', color: 'var(--text-primary)' }}>{pat.name}</strong>
                         <ProvenanceBadge type="user_provided" size="small" />
                       </div>
-                      <div className="small muted" style={{ marginTop: '0.2rem' }}>
+                      <div className="small muted patient-directory-meta" style={{ marginTop: '0.2rem' }}>
                         Age: {pat.age ?? 'Not specified'} · Sex: {pat.sex ?? 'Not specified'} · Registered: {pat.created_at ? pat.created_at.slice(0, 10) : '—'}
                       </div>
                     </div>
@@ -81,7 +78,7 @@ export default function OverviewPage({
                         onSelectPatient(pat.patient_id)
                       }}
                     >
-                      Open Record ?
+                      Open Record
                     </button>
                   </div>
                 ))}

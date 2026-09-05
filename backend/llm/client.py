@@ -107,12 +107,15 @@ class GeminiClient:
         if model_name.startswith("models/"):
             model_name = model_name[7:]
 
-        endpoint = f"{self.base_url}/models/{model_name}:generateContent?key={self.api_key}"
+        endpoint = f"{self.base_url}/models/{model_name}:generateContent"
 
         try:
             response = requests.post(
                 endpoint,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": self.api_key,
+                },
                 json=payload,
                 timeout=settings.GEMINI_TIMEOUT,
             )

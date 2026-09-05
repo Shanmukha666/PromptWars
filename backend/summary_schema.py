@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 MANDATORY_FOOTER = "MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation."
 
@@ -70,6 +70,20 @@ class ClinicalSummarySchema(BaseModel):
             if re.search(pattern, text, re.I):
                 raise ValueError(f"Overview contains ungrounded diagnostic or prescriptive phrase: {pattern}")
         return text
+
+    @model_validator(mode='after')
+    def validate_all_summary_text(self) -> 'ClinicalSummarySchema':
+        for field_name in (
+            'key_findings',
+            'outside_source_ranges',
+            'medication_allergy_info',
+            'items_needing_review',
+        ):
+            for value in getattr(self, field_name):
+                for pattern in FORBIDDEN_DIAGNOSTIC_PATTERNS:
+                    if re.search(pattern, value, re.I):
+                        raise ValueError(f"{field_name} contains unsafe diagnostic or prescriptive language.")
+        return self
 
     def to_dict(self) -> Dict[str, Any]:
         data = self.model_dump()

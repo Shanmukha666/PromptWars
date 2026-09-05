@@ -18,8 +18,10 @@ from backend.exceptions import (
     MagicBytesMismatchError,
     EmptyDocumentError,
     DocumentExtractionError,
+    PatientNotFoundError,
 )
 from backend.repositories.report_repository import ReportRepository
+from backend.repositories.patient_repository import PatientRepository
 from backend.services.extraction_service import ExtractionService
 from backend.services.summary_service import SummaryService
 from backend.llm.client import GeminiClient
@@ -36,11 +38,13 @@ class IngestionService:
         extraction_service: ExtractionService,
         summary_service: SummaryService,
         llm: GeminiClient,
+        patient_repo: PatientRepository,
     ):
         self.report_repo = report_repo
         self.extraction_service = extraction_service
         self.summary_service = summary_service
         self.llm = llm
+        self.patient_repo = patient_repo
         self.parser = get_parser_service()
 
     async def ingest_file(
@@ -147,20 +151,24 @@ class IngestionService:
         metadata: Dict[str, Any],
         tables: list,
     ) -> Dict[str, Any]:
+        if patient_id and not self.patient_repo.get_patient(patient_id, session_id=session_id):
+            raise PatientNotFoundError(patient_id)
+
+        # Laboratory bounds and status labels must remain source-derived.
+        extracted = {
+            "labs": self.extraction_service.extract_labs(raw_text),
+            "entities": self.extraction_service.extract_entities(raw_text),
+        }
         if self.llm.configured:
             try:
-                extracted = self.llm.extract_clinical_data(raw_text)
+                candidate = self.llm.extract_clinical_data(raw_text)
+                if isinstance(candidate, dict) and isinstance(candidate.get("entities"), dict):
+                    extracted["entities"] = {
+                        **extracted["entities"],
+                        **{key: value for key, value in candidate["entities"].items() if isinstance(value, list)},
+                    }
             except Exception as e:
                 logger.warning("LLM extraction failed (%s), falling back to deterministic extractor", type(e).__name__)
-                extracted = {
-                    "labs": self.extraction_service.extract_labs(raw_text),
-                    "entities": self.extraction_service.extract_entities(raw_text),
-                }
-        else:
-            extracted = {
-                "labs": self.extraction_service.extract_labs(raw_text),
-                "entities": self.extraction_service.extract_entities(raw_text),
-            }
 
         cleaned_labs = {}
         for test_key, item in extracted.get("labs", {}).items():

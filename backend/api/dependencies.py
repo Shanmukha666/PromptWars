@@ -55,7 +55,7 @@ extraction_service = ExtractionService()
 summary_service = SummaryService(llm_client)
 provenance_service = ProvenanceService(report_repo)
 comparison_service = ComparisonService()
-ingestion_service = IngestionService(report_repo, extraction_service, summary_service, llm_client)
+ingestion_service = IngestionService(report_repo, extraction_service, summary_service, llm_client, patient_repo)
 
 
 def get_patient_repo() -> PatientRepository:

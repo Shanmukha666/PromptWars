@@ -3,7 +3,7 @@ import ProvenanceBadge from './ProvenanceBadge'
 import { IconDoc, IconUploadCloud, IconCheckCircle, IconClose } from './Icons'
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.json', '.html', '.htm', '.xml']
-const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // Must match backend MAX_UPLOAD_BYTES
 
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B'
@@ -52,7 +52,7 @@ export default function ReportsPage({
       }
 
       if (file.size > MAX_FILE_SIZE) {
-        setValidationError(`"${file.name}" exceeds the maximum allowed file size of 50 MB.`)
+        setValidationError(`"${file.name}" exceeds the maximum allowed file size of 10 MB.`)
         return
       }
 
@@ -234,6 +234,9 @@ export default function ReportsPage({
           <div>
             <div
               className={`dropzone ${dragActive ? 'drag' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-label="Choose clinical report files"
               style={{
                 border: dragActive ? '2px dashed var(--brand-primary)' : '2px dashed var(--border-color)',
                 borderRadius: 'var(--radius-card)',
@@ -247,6 +250,12 @@ export default function ReportsPage({
               onDragLeave={() => setDragActive(false)}
               onDrop={handleFileDrop}
               onClick={() => fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  fileInputRef.current?.click()
+                }
+              }}
             >
               <input
                 id="report-file-input"
@@ -258,21 +267,6 @@ export default function ReportsPage({
                 className="sr-only"
                 aria-label="Upload clinical report files"
               />
-              <label
-                htmlFor="report-file-input"
-                className="primary-btn"
-                tabIndex={0}
-                role="button"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    if (fileInputRef.current) fileInputRef.current.click()
-                  }
-                }}
-                style={{ display: 'inline-flex', cursor: 'pointer', margin: '0.5rem auto' }}
-              >
-                Browse Files
-              </label>
               <div style={{ display: 'inline-flex', padding: '0.75rem', borderRadius: '50%', background: 'var(--bg-surface)', color: 'var(--brand-primary)', marginBottom: '0.75rem' }}>
                 <IconUploadCloud size={30} />
               </div>
@@ -280,7 +274,7 @@ export default function ReportsPage({
                 Drag and drop medical reports here
               </div>
               <div className="small muted" style={{ marginBottom: '1rem' }}>
-                PDF, DOCX, TXT, JSON, HTML/XML (up to 50 MB per file)
+                PDF, DOCX, TXT, JSON, HTML/XML (up to 10 MB per file)
               </div>
               <div>
                 <button
