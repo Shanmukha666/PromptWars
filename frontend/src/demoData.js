@@ -59,6 +59,37 @@ Patient presents with symptomatic fatigue and exertion-associated dyspnea.
 Elevated fasting glucose (142 mg/dL) consistent with patient history of diabetes.
 Mild elevation in serum creatinine (1.4 mg/dL against upper threshold of 1.2 mg/dL).
 Recommend clinical correlation with serum ferritin, total iron-binding capacity (TIBC), and renal function monitoring.`,
+          ai_summary: {
+            overview: "Factual record overview for Complete Blood Count & Metabolic Panel (LAB-2026-99410). The document reports 8 laboratory observations, patient-reported symptoms (fatigue, mild exertional dyspnea), and documented outpatient medications.",
+            key_findings: [
+              "Hemoglobin measured at 9.2 g/dL (classified low against source reference interval 12.0 - 16.0 g/dL)",
+              "Creatinine measured at 1.4 mg/dL (classified high against source reference interval < 1.2 mg/dL)",
+              "Fasting glucose measured at 142 mg/dL (classified high against source reference interval 70 - 99 mg/dL)",
+              "WBC count: 7.8 x10^3/uL (within source reference interval 4.0 - 11.0 x10^3/uL)",
+              "Platelet count: 240 x10^3/uL (within source reference interval 150 - 450 x10^3/uL)",
+              "Urinalysis Glucose reported as Negative"
+            ],
+            outside_source_ranges: [
+              "HEMOGLOBIN: 9.2 g/dL (classified low against source reference range: 12.0 - 16.0 g/dL)",
+              "CREATININE: 1.4 mg/dL (classified high against source reference range: < 1.2 mg/dL)",
+              "GLUCOSE: 142 mg/dL (classified high against source reference range: 70 - 99 mg/dL)"
+            ],
+            medication_allergy_info: [
+              "Documented medication(s): Lisinopril 20 mg daily, Metformin 500 mg twice daily",
+              "Documented allergy: Penicillin (Urticaria/Hives, Moderate)"
+            ],
+            items_needing_review: [
+              "Borderline elevated serum creatinine (1.4 mg/dL) relative to source threshold (<1.2 mg/dL) requires clinician review.",
+              "Source text notes microcytic indices; correlation with iron studies suggested in report text."
+            ],
+            footer: "MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation.",
+            summary: "Factual record overview for Complete Blood Count & Metabolic Panel (LAB-2026-99410).",
+            bullet_points: [
+              "Hemoglobin: 9.2 g/dL (classified low against source range 12.0 - 16.0 g/dL)",
+              "Creatinine: 1.4 mg/dL (classified high against source range < 1.2 mg/dL)",
+              "Glucose: 142 mg/dL (classified high against source range 70 - 99 mg/dL)"
+            ]
+          },
           extracted: {
             labs: {
               hemoglobin: {
@@ -271,6 +302,37 @@ CBC Results:
 Hemoglobin: 11.4 g/dL (Ref: 12.0 - 16.0 g/dL) [L]
 Platelets: 255 x10^3/uL (Ref: 150 - 450 x10^3/uL)
 WBC: 6.9 x10^3/uL (Ref: 4.0 - 11.0 x10^3/uL)`,
+          ai_summary: {
+            overview: "Factual record overview for Complete Blood Count & Metabolic Panel (LAB-2026-99410). The document reports 8 laboratory observations, patient-reported symptoms (fatigue, mild exertional dyspnea), and documented outpatient medications.",
+            key_findings: [
+              "Hemoglobin measured at 9.2 g/dL (classified low against source reference interval 12.0 - 16.0 g/dL)",
+              "Creatinine measured at 1.4 mg/dL (classified high against source reference interval < 1.2 mg/dL)",
+              "Fasting glucose measured at 142 mg/dL (classified high against source reference interval 70 - 99 mg/dL)",
+              "WBC count: 7.8 x10^3/uL (within source reference interval 4.0 - 11.0 x10^3/uL)",
+              "Platelet count: 240 x10^3/uL (within source reference interval 150 - 450 x10^3/uL)",
+              "Urinalysis Glucose reported as Negative"
+            ],
+            outside_source_ranges: [
+              "HEMOGLOBIN: 9.2 g/dL (classified low against source reference range: 12.0 - 16.0 g/dL)",
+              "CREATININE: 1.4 mg/dL (classified high against source reference range: < 1.2 mg/dL)",
+              "GLUCOSE: 142 mg/dL (classified high against source reference range: 70 - 99 mg/dL)"
+            ],
+            medication_allergy_info: [
+              "Documented medication(s): Lisinopril 20 mg daily, Metformin 500 mg twice daily",
+              "Documented allergy: Penicillin (Urticaria/Hives, Moderate)"
+            ],
+            items_needing_review: [
+              "Borderline elevated serum creatinine (1.4 mg/dL) relative to source threshold (<1.2 mg/dL) requires clinician review.",
+              "Source text notes microcytic indices; correlation with iron studies suggested in report text."
+            ],
+            footer: "MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation.",
+            summary: "Factual record overview for Complete Blood Count & Metabolic Panel (LAB-2026-99410).",
+            bullet_points: [
+              "Hemoglobin: 9.2 g/dL (classified low against source range 12.0 - 16.0 g/dL)",
+              "Creatinine: 1.4 mg/dL (classified high against source range < 1.2 mg/dL)",
+              "Glucose: 142 mg/dL (classified high against source range 70 - 99 mg/dL)"
+            ]
+          },
           extracted: {
             labs: {
               hemoglobin: {

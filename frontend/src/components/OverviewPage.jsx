@@ -240,11 +240,11 @@ export default function OverviewPage({
         </div>
       </div>
 
-      {/* 2. Primary Summary Card */}
+      {/* 2. Structured AI Record Summary Card */}
       <div className="card" style={{ borderLeft: '4px solid var(--brand-primary)' }}>
-        <div className="section-head" style={{ marginBottom: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--text-primary)' }}>Record summary</h3>
+        <div className="section-head" style={{ marginBottom: '0.85rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--text-primary)' }}>Structured Record Summary</h3>
             <ProvenanceBadge type="ai_generated" size="small" />
           </div>
           {hasReports && onNavigateStage && (
@@ -252,29 +252,118 @@ export default function OverviewPage({
               className="secondary-btn btn-sm"
               onClick={() => onNavigateStage('structured')}
             >
-              View Full Record ?
+              View Full Observation Table &rarr;
             </button>
           )}
         </div>
 
-        <div style={{ padding: '0.85rem 1rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-input)', border: '1px solid var(--border-color)' }}>
-          <p style={{ fontSize: '14.5px', lineHeight: '1.6', color: 'var(--text-primary)', margin: 0 }}>
-            {primarySummary}
+        {/* Section 1: Overview */}
+        <div style={{ padding: '0.85rem 1rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-input)', border: '1px solid var(--border-color)', marginBottom: '1rem' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--brand-primary)', marginBottom: '0.35rem' }}>
+            Overview
+          </div>
+          <p style={{ fontSize: '14px', lineHeight: '1.6', color: 'var(--text-primary)', margin: 0 }}>
+            {recentReport?.ai_summary?.overview || primarySummary}
           </p>
-
-          {recentReport?.ai_summary?.bullet_points?.length > 0 && (
-            <ul style={{ marginTop: '0.65rem', paddingLeft: '1.25rem', fontSize: '13px', color: 'var(--text-primary)', display: 'grid', gap: '0.25rem' }}>
-              {recentReport.ai_summary.bullet_points.map((pt, idx) => (
-                <li key={idx}>{pt}</li>
-              ))}
-            </ul>
-          )}
         </div>
 
-        {/* Mandatory Clinical Disclaimer */}
-        <div style={{ marginTop: '0.75rem', fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <span>?</span>
-          <span>This summary organizes available information and is not a diagnosis or treatment recommendation.</span>
+        {/* Section 2 & 3: Key findings and Outside source ranges in a responsive two-column grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0.85rem', marginBottom: '0.85rem' }}>
+          {/* Key findings */}
+          <div style={{ padding: '0.85rem 1rem', background: 'var(--bg-surface)', borderRadius: 'var(--radius-input)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--status-info)' }}></span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Key Findings</span>
+            </div>
+            {recentReport?.ai_summary?.key_findings?.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: '1.15rem', fontSize: '12.5px', color: 'var(--text-primary)', display: 'grid', gap: '0.35rem' }}>
+                {recentReport.ai_summary.key_findings.map((pt, idx) => (
+                  <li key={idx} style={{ lineHeight: '1.45' }}>{pt}</li>
+                ))}
+              </ul>
+            ) : recentReport?.ai_summary?.bullet_points?.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: '1.15rem', fontSize: '12.5px', color: 'var(--text-primary)', display: 'grid', gap: '0.35rem' }}>
+                {recentReport.ai_summary.bullet_points.map((pt, idx) => (
+                  <li key={idx} style={{ lineHeight: '1.45' }}>{pt}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="small muted">No key observation bullet points documented.</div>
+            )}
+          </div>
+
+          {/* Outside source ranges */}
+          <div style={{ padding: '0.85rem 1rem', background: recentReport?.ai_summary?.outside_source_ranges?.length > 0 ? 'var(--status-warning-bg)' : 'var(--bg-surface)', borderRadius: 'var(--radius-input)', border: `1px solid ${recentReport?.ai_summary?.outside_source_ranges?.length > 0 ? 'var(--status-warning-border)' : 'var(--border-color)'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: recentReport?.ai_summary?.outside_source_ranges?.length > 0 ? 'var(--status-warning)' : 'var(--status-success)' }}></span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: recentReport?.ai_summary?.outside_source_ranges?.length > 0 ? 'var(--status-warning)' : 'var(--text-primary)' }}>
+                Outside Source Ranges
+              </span>
+            </div>
+            {recentReport?.ai_summary?.outside_source_ranges?.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: '1.15rem', fontSize: '12.5px', color: 'var(--text-primary)', display: 'grid', gap: '0.35rem' }}>
+                {recentReport.ai_summary.outside_source_ranges.map((pt, idx) => (
+                  <li key={idx} style={{ lineHeight: '1.45' }}>{pt}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="small muted">All evaluated observations fall within source-provided reference intervals.</div>
+            )}
+          </div>
+        </div>
+
+        {/* Section 4 & 5: Medication/Allergy Info and Items Needing Review */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0.85rem', marginBottom: '0.85rem' }}>
+          {/* Medication / Allergy information */}
+          <div style={{ padding: '0.85rem 1rem', background: 'var(--bg-surface)', borderRadius: 'var(--radius-input)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--brand-primary)' }}></span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Medication / Allergy Record</span>
+            </div>
+            {recentReport?.ai_summary?.medication_allergy_info?.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: '1.15rem', fontSize: '12.5px', color: 'var(--text-primary)', display: 'grid', gap: '0.35rem' }}>
+                {recentReport.ai_summary.medication_allergy_info.map((pt, idx) => (
+                  <li key={idx} style={{ lineHeight: '1.45' }}>{pt}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="small muted">No medications or allergies documented in this report record.</div>
+            )}
+          </div>
+
+          {/* Items needing review */}
+          <div style={{ padding: '0.85rem 1rem', background: recentReport?.ai_summary?.items_needing_review?.length > 0 ? 'var(--status-neutral-bg)' : 'var(--bg-surface)', borderRadius: 'var(--radius-input)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#64748B' }}></span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>Items Needing Review</span>
+            </div>
+            {recentReport?.ai_summary?.items_needing_review?.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: '1.15rem', fontSize: '12.5px', color: 'var(--text-primary)', display: 'grid', gap: '0.35rem' }}>
+                {recentReport.ai_summary.items_needing_review.map((pt, idx) => (
+                  <li key={idx} style={{ lineHeight: '1.45' }}>{pt}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="small muted">No missing reference ranges or extraction uncertainties detected.</div>
+            )}
+          </div>
+        </div>
+
+        {/* Section 6: Footer Disclaimer */}
+        <div style={{
+          marginTop: '0.75rem',
+          padding: '0.65rem 1rem',
+          background: 'var(--bg-subtle)',
+          borderRadius: 'var(--radius-input)',
+          border: '1px solid var(--border-color)',
+          fontSize: '12px',
+          color: 'var(--text-secondary)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <span style={{ color: 'var(--brand-primary)', fontWeight: 'bold' }}>&#9432;</span>
+          <span>{recentReport?.ai_summary?.footer || "MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation."}</span>
         </div>
       </div>
 
@@ -602,4 +691,5 @@ export default function OverviewPage({
       </div>
     </div>
   )
-}
+}
+

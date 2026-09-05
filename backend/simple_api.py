@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from backend.llm import GeminiClient, GeminiError, FeatherlessClient, FeatherlessError
 from backend.reference_range import extract_labs_from_report, parse_source_reference_range, evaluate_clinical_status
+from backend.summary_schema import ClinicalSummarySchema, validate_or_fallback_summary, MANDATORY_FOOTER
 from backend.retrieval import RetrievalStore
 from services.parser import get_parser_service
 
@@ -221,19 +222,29 @@ class Analyzer:
         )
 
     def _build_ai_summary(self, title: str, raw_text: str, metadata: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            if self.llm.configured:
-                summary = self.llm.summarize_document(title=title, text=raw_text, metadata=metadata, extracted=extracted)
-            else:
-                summary = self._fallback_document_summary(title=title, raw_text=raw_text, extracted=extracted)
-        except Exception:
-            summary = self._fallback_document_summary(title=title, raw_text=raw_text, extracted=extracted)
-        summary.setdefault('summary', 'Clinical document extracted and indexed.')
-        summary.setdefault('bullet_points', [])
-        summary.setdefault('entities', extracted.get('entities', {}))
-        summary.setdefault('tags', [])
-        summary.setdefault('disclaimer', 'MedLens extraction is informational only. Does not diagnose or prescribe.')
-        return summary
+        """
+        Builds structured clinical summary.
+        Server-side validates against ClinicalSummarySchema.
+        Do NOT silently treat malformed LLM output as clinical fact.
+        """
+        if self.llm.configured:
+            try:
+                candidate = self.llm.summarize_document(title=title, text=raw_text, metadata=metadata, extracted=extracted)
+                return validate_or_fallback_summary(
+                    candidate=candidate,
+                    title=title,
+                    raw_text=raw_text,
+                    extracted=extracted,
+                    fallback_builder=self._fallback_document_summary
+                )
+            except Exception as exc:
+                return self._fallback_document_summary(
+                    title=title,
+                    raw_text=raw_text,
+                    extracted=extracted,
+                    review_reason=f"AI summarization service error ({type(exc).__name__}). Deterministic factual summary provided."
+                )
+        return self._fallback_document_summary(title=title, raw_text=raw_text, extracted=extracted)
 
     def answer_question(self, question: str, document_id: Optional[str], top_k: int) -> Dict[str, Any]:
         doc = self.store.get_document(document_id) if document_id else None
@@ -482,36 +493,93 @@ class Analyzer:
                 sections.append({'heading': heading, 'content': content[:1800]})
         return sections or [{'heading': 'Extracted text', 'content': text[:2500]}]
 
-    def _fallback_document_summary(self, title: str, raw_text: str, extracted: Dict[str, Any]) -> Dict[str, Any]:
+    def _fallback_document_summary(
+        self,
+        title: str,
+        raw_text: str,
+        extracted: Dict[str, Any],
+        review_reason: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Deterministic factual summary organizing information strictly without diagnostic assertions.
+        Conforms precisely to ClinicalSummarySchema.
+        """
         labs = extracted.get('labs', {})
         entities = extracted.get('entities', {})
-        flagged = [
-            f"{name.upper()}: {item['value']} {item.get('unit', '')} (flagged {item['status']} against source range {item.get('reference_range_text')})"
-            for name, item in labs.items()
-            if item.get('status') in {'low', 'high'}
-        ]
+
+        # 1. Outside source ranges: ONLY values classified against explicit source-provided ranges
+        outside_source_ranges = []
+        for name, item in labs.items():
+            st = item.get('status')
+            raw_range = item.get('reference_range_raw') or item.get('source_range_raw')
+            if st in {'low', 'high'} and raw_range:
+                val = item.get('value')
+                unit = item.get('unit', '')
+                outside_source_ranges.append(
+                    f"{name.upper()}: {val} {unit} (classified {st} against source reference range: {raw_range})".strip()
+                )
+
+        # 2. Key findings: factual observations directly from source
+        key_findings = []
+        for name, item in list(labs.items())[:6]:
+            val = item.get('value')
+            unit = item.get('unit', '')
+            key_findings.append(f"{name.capitalize()}: {val} {unit}".strip())
+        for sym in entities.get('symptoms', [])[:4]:
+            key_findings.append(f"Documented symptom: {sym}")
+        for cond in entities.get('conditions', [])[:3]:
+            key_findings.append(f"Documented condition mention: {cond}")
+
+        # 3. Medication & Allergy information
+        medication_allergy_info = []
+        meds = entities.get('medications', [])
+        if meds:
+            medication_allergy_info.append(f"Documented medication(s): {', '.join(meds)}")
+        else:
+            medication_allergy_info.append("No active medications explicitly recorded in this report.")
+        allergies = entities.get('allergies', [])
+        if allergies:
+            medication_allergy_info.append(f"Documented allergy mention(s): {', '.join(allergies)}")
+
+        # 4. Items needing review
+        items_needing_review = []
+        if review_reason:
+            items_needing_review.append(review_reason)
         not_assessed = [
-            f"{name.upper()}: {item['value']} {item.get('unit', '')} (Reference range not available in source report.)"
+            f"{name.upper()} ({item.get('value')} {item.get('unit', '')}) — No reference range provided in source report (not assessed)."
             for name, item in labs.items()
             if item.get('status') == 'not_assessed'
         ]
-        symptoms = entities.get('symptoms', [])
-        conditions = entities.get('conditions', [])
-        tags = list(dict.fromkeys([*symptoms[:3], *[name for name in labs.keys()], *conditions[:2]]))[:6]
-        bullets = (flagged + not_assessed)[:6] or [raw_text[:200].strip()]
-        
-        summary = f"Factual summary of {title}: Extracted {len(labs)} lab parameter(s) and {len(symptoms) + len(conditions)} documented clinical entities."
-        if flagged:
-            summary += f" {len(flagged)} value(s) fall outside explicit source-provided reference ranges."
         if not_assessed:
-            summary += f" {len(not_assessed)} value(s) have no reference range available in the source report."
+            items_needing_review.extend(not_assessed)
+        ambiguous = [
+            f"{name.upper()} — Reference range is ambiguous or malformed in source text."
+            for name, item in labs.items()
+            if item.get('needs_review') and item.get('status') != 'not_assessed'
+        ]
+        if ambiguous:
+            items_needing_review.extend(ambiguous)
+
+        # 5. Overview paragraph: concise, patient-friendly, factual, non-diagnostic
+        overview = f"Factual summary of {title}. Contains {len(labs)} extracted laboratory observation(s) and {len(entities.get('symptoms', [])) + len(entities.get('conditions', []))} documented clinical context mention(s)."
+        if outside_source_ranges:
+            overview += f" {len(outside_source_ranges)} observation(s) fall outside source-provided reference ranges."
+        if not_assessed:
+            overview += f" {len(not_assessed)} observation(s) lacked source-provided reference ranges and are marked as not assessed."
 
         return {
-            'summary': summary,
-            'bullet_points': bullets,
+            'overview': overview,
+            'key_findings': key_findings or ["Document observations extracted and indexed."],
+            'outside_source_ranges': outside_source_ranges,
+            'medication_allergy_info': medication_allergy_info,
+            'items_needing_review': items_needing_review,
+            'footer': MANDATORY_FOOTER,
+            # Backward compatibility aliases
+            'summary': overview,
+            'bullet_points': key_findings,
+            'disclaimer': MANDATORY_FOOTER,
             'entities': entities,
-            'tags': tags,
-            'disclaimer': 'MedLens extraction is informational only and does not diagnose, prescribe, or recommend treatment. Review source records with a healthcare provider.',
+            'tags': list(dict.fromkeys([name for name in labs.keys()]))[:6],
         }
 
     def _fallback_answer(self, question: str, chunks: List[Dict[str, Any]], document: Optional[Dict[str, Any]]) -> Dict[str, Any]:

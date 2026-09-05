@@ -222,17 +222,28 @@ class GeminiClient:
 
     def summarize_document(self, *, title: str, text: str, metadata: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
         prompt = (
-            'You are an expert clinical information summarizer for MedLens. Create a clear, concise, patient-friendly, and clinician-reviewable factual summary of the document.\n'
-            'CRITICAL CLINICAL SAFETY RULES:\n'
-            '- Do NOT diagnose, prescribe, recommend treatment, recommend dosage changes, or speculate on medical outcomes.\n'
-            '- Only summarize facts explicitly documented in the report.\n'
-            '- Clearly indicate that this summary is informational and requires human verification.\n'
-            'Return strict JSON with keys:\n'
-            '  "summary": A concise patient-friendly narrative of what the report contains,\n'
-            '  "bullet_points": List of key factual findings directly from the report,\n'
-            '  "entities": Object containing extracted symptoms, conditions, and medications,\n'
-            '  "tags": List of 3-6 relevant descriptive keywords,\n'
-            '  "disclaimer": "This summary is for informational and organizational purposes only and does not constitute medical advice, diagnosis, or treatment recommendations. Always consult a licensed healthcare professional for clinical decisions."'
+            'You are an expert clinical information organizing assistant for MedLens.\n'
+            'Your absolute mandate is to ORGANIZE information explicitly present in this document, NOT to diagnose or advise.\n\n'
+            'SYSTEM BEHAVIOR RULES:\n'
+            '- Describe ONLY what is explicitly present in the source report.\n'
+            '- Highlight values outside source-provided reference ranges.\n'
+            '- Mention missing or uncertain information clearly.\n'
+            '- STRICTLY AVOID medical diagnosis (never state or infer diseases not explicitly affirmed in source).\n'
+            '- STRICTLY AVOID causal claims unsupported by source evidence.\n'
+            '- STRICTLY AVOID medication recommendations.\n'
+            '- STRICTLY AVOID treatment recommendations.\n'
+            '- STRICTLY AVOID dosage advice.\n'
+            '- STRICTLY AVOID emergency triage claims unless directly quoting explicit source instructions.\n'
+            '- Clearly identify uncertainty.\n\n'
+            'Return strict JSON matching the exact following structure:\n'
+            '{\n'
+            '  "overview": "A concise patient-friendly paragraph describing the document type and what is explicitly present.",\n'
+            '  "key_findings": ["Factual source-grounded observations directly from the report text."],\n'
+            '  "outside_source_ranges": ["Only values classified using explicit source-provided ranges, e.g. HEMOGLOBIN: 9.2 g/dL (classified low against source range 12.0-16.0 g/dL). If no source range exists in the report, DO NOT include here."],\n'
+            '  "medication_allergy_info": ["Factual record only of medications and allergies documented in the report, or state none documented."],\n'
+            '  "items_needing_review": ["Extraction uncertainty, missing ranges, conflicts, or ambiguities requiring clinician verification."],\n'
+            '  "footer": "MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation."\n'
+            '}'
         )
         user = {
             'title': title,
@@ -246,7 +257,7 @@ class GeminiClient:
                 {'role': 'user', 'content': json.dumps(user, ensure_ascii=False)},
             ],
             temperature=0.1,
-            max_tokens=900,
+            max_tokens=1200,
             response_format={'type': 'json_object'},
         )
         try:

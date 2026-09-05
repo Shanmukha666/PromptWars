@@ -6,6 +6,7 @@ from backend.reference_range import (
     extract_labs_from_report,
 )
 from db.models import serialize_weights, deserialize_weights
+from backend.summary_schema import ClinicalSummarySchema, validate_or_fallback_summary, MANDATORY_FOOTER
 
 
 class TestMedLensClinicalSafety(unittest.TestCase):
@@ -224,6 +225,120 @@ class TestMedLensClinicalSafety(unittest.TestCase):
         self.assertEqual(test_weights, deserialized)
         import json
         self.assertTrue(isinstance(json.loads(serialized), list))
+
+
+    # AI Summarization Safety Tests
+    def test_summary_schema_validates_structured_json(self):
+        """Test that ClinicalSummarySchema successfully validates clean structured candidate output."""
+        candidate = {
+            "overview": "Clinical summary for outpatient CBC panel.",
+            "key_findings": ["Hemoglobin 9.2 g/dL", "WBC 7.8 x10^3/uL"],
+            "outside_source_ranges": ["Hemoglobin 9.2 g/dL (low against 12.0-16.0 g/dL)"],
+            "medication_allergy_info": ["Metformin 500mg"],
+            "items_needing_review": ["Follow-up iron studies recommended by source text"],
+            "footer": MANDATORY_FOOTER
+        }
+        validated = ClinicalSummarySchema.model_validate(candidate)
+        data = validated.to_dict()
+        self.assertEqual(data['overview'], candidate['overview'])
+        self.assertEqual(data['footer'], MANDATORY_FOOTER)
+        self.assertEqual(data['summary'], candidate['overview'])
+        self.assertEqual(len(data['key_findings']), 2)
+
+    def test_summary_malformed_llm_output_never_treated_as_fact(self):
+        """
+        CRITICAL SAFETY RULE:
+        Do not silently treat malformed LLM output as clinical fact.
+        When LLM returns corrupted text or unparseable JSON, the pipeline must reject it,
+        generate a deterministic factual summary, and explicitly log the validation failure in items_needing_review.
+        """
+        malformed_candidates = [
+            "This is just raw unformatted prose without JSON structure.",
+            {"broken_keys": 123},
+            {"overview": ""},  # empty overview fails validation
+            None,
+            42
+        ]
+        extracted = {
+            'labs': {
+                'hemoglobin': {'value': 9.2, 'unit': 'g/dL', 'status': 'low', 'reference_range_raw': '12.0-16.0'},
+                'platelets': {'value': 240, 'unit': '', 'status': 'normal', 'reference_range_raw': '150-450'}
+            },
+            'entities': {'symptoms': ['fatigue'], 'conditions': [], 'medications': ['lisinopril']}
+        }
+
+        for candidate in malformed_candidates:
+            result = validate_or_fallback_summary(
+                candidate=candidate,
+                title="Lab Report",
+                raw_text="Sample text",
+                extracted=extracted,
+                fallback_builder=self.analyzer._fallback_document_summary
+            )
+            # Must return clean dictionary adhering to schema
+            self.assertIn('overview', result)
+            self.assertIn('key_findings', result)
+            self.assertIn('outside_source_ranges', result)
+            self.assertIn('items_needing_review', result)
+            self.assertEqual(result['footer'], MANDATORY_FOOTER)
+            # Must explicitly flag review necessity
+            review_text = ' '.join(result['items_needing_review'])
+            self.assertTrue(
+                'validation' in review_text.lower() or 'deterministic' in review_text.lower() or 'json' in review_text.lower(),
+                f"Expected validation fallback note in items_needing_review, got: {result['items_needing_review']}"
+            )
+
+    def test_summary_outside_source_ranges_only_contains_explicit_ranges(self):
+        """
+        Test that outside_source_ranges strictly includes ONLY parameters with explicit source reference ranges.
+        Parameters lacking ranges or marked not_assessed must NEVER be placed in outside_source_ranges.
+        """
+        extracted = {
+            'labs': {
+                'hemoglobin': {'value': 8.5, 'unit': 'g/dL', 'status': 'low', 'reference_range_raw': '12.0-16.0'},
+                'creatinine': {'value': 2.1, 'unit': 'mg/dL', 'status': 'not_assessed', 'reference_range_raw': None},
+                'potassium': {'value': 5.8, 'unit': 'mmol/L', 'status': 'high', 'reference_range_raw': '3.5-5.0'},
+            },
+            'entities': {'symptoms': [], 'conditions': [], 'medications': []}
+        }
+        summary = self.analyzer._fallback_document_summary("Metabolic Panel", "raw text", extracted)
+        outside_texts = ' '.join(summary['outside_source_ranges'])
+        self.assertIn('HEMOGLOBIN', outside_texts)
+        self.assertIn('POTASSIUM', outside_texts)
+        self.assertNotIn('CREATININE', outside_texts, "Not-assessed lab must not appear in outside_source_ranges!")
+
+        review_texts = ' '.join(summary['items_needing_review'])
+        self.assertIn('CREATININE', review_texts, "Lab without source range must appear in items_needing_review!")
+
+    def test_summary_enforces_mandatory_non_diagnostic_footer(self):
+        """Test that the mandatory non-diagnostic legal footer is always present and exact."""
+        candidate = {
+            "overview": "Report summary overview.",
+            "footer": "Arbitrary other text"  # attempts to override footer
+        }
+        validated = ClinicalSummarySchema.model_validate(candidate)
+        self.assertEqual(validated.footer, MANDATORY_FOOTER)
+        self.assertEqual(
+            validated.footer,
+            "MedLens organizes the information available in this record. It does not provide a diagnosis or treatment recommendation."
+        )
+
+    def test_summary_overview_rejects_unsupported_diagnostic_assertions(self):
+        """Test that overview strings containing prohibited prescriptive or diagnostic assertions fail validation."""
+        bad_overviews = [
+            "Patient is diagnosed with severe chronic kidney disease.",
+            "We prescribe 500mg amoxicillin twice daily.",
+            "Doctor should increase dosage of metformin.",
+            "Patient suffers from acute anemia."
+        ]
+        for bad_text in bad_overviews:
+            candidate = {
+                "overview": bad_text,
+                "key_findings": [],
+                "outside_source_ranges": []
+            }
+            with self.assertRaises(ValueError):
+                ClinicalSummarySchema.model_validate(candidate)
 
 
 if __name__ == '__main__':
